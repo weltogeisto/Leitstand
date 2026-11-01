@@ -97,6 +97,9 @@ const ROUTE_SCOPES: { method: string; path: RegExp; scope: Scope }[] = [
   // MC_TOKEN, the same way POST /api/progress/ingest does. An agent
   // credential cannot send alerts.
   { method: "GET", path: /^\/api\/tasks$/, scope: "tasks:read" },
+  { method: "GET", path: /^\/api\/tasks\/[^/]+$/, scope: "tasks:read" },
+  { method: "GET", path: /^\/api\/work$/, scope: "tasks:read" },
+  { method: "POST", path: /^\/api\/work$/, scope: "tasks:write" },
   { method: "POST", path: /^\/api\/tasks$/, scope: "tasks:write" },
   { method: "POST", path: /^\/api\/tasks\/claim$/, scope: "tasks:write" },
   { method: "PATCH", path: /^\/api\/tasks\/[^/]+$/, scope: "tasks:write" },

@@ -5,14 +5,14 @@ WSL = str(pathlib.Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/w
 SCRIPT = '/opt/leitstand-worker/wsl_worker.py'
 RUNTIME = pathlib.Path.home() / '.leitstand'
 
-def report(job, platform, kind, status):
+def report(job, platform, kind, status, project=None):
     if platform not in ('codex', 'claude-code'): return
     try:
         config = json.loads((RUNTIME / ('codex.json' if platform == 'codex' else 'claude.json')).read_text())
         data = {'agent_id': config['MC_AGENT'], 'display_name': config['MC_AGENT_NAME'],
                 'machine': 'weltogeisto', 'platform': platform, 'session_id': 'isolated-' + job,
                 'kind': kind, 'status': status, 'title': 'Isolated worker ' + status,
-                'project': 'leitstand', 'detail': {'isolated': True}}
+                'project': project or pathlib.Path.cwd().name, 'detail': {'isolated': True}}
         req = urllib.request.Request(config['MC_URL'].rstrip('/') + '/api/ingest', data=json.dumps(data).encode(),
                 headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + config['MC_TOKEN']})
         with urllib.request.urlopen(req, timeout=8) as response: response.read()
@@ -57,14 +57,15 @@ def main():
     if action == 'stop':
         result = subprocess.call(command, stdin=subprocess.DEVNULL)
         if result == 0 and state.exists():
-            report(job, json.loads(state.read_text())['platform'], 'session_end', 'failed')
+            saved = json.loads(state.read_text())
+            report(job, saved['platform'], 'session_end', 'failed', saved.get('project'))
             state.unlink(missing_ok=True)
         return result
     if action != 'run': raise ValueError('Invalid action')
     platform = sys.argv[3]
     data = payload(platform, sys.argv[4:])
     if platform != 'doctor':
-        state.write_text(json.dumps({'platform': platform}))
+        state.write_text(json.dumps({'platform': platform, 'project': pathlib.Path.cwd().name}))
         report(job, platform, 'session_start', 'active')
     proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=sys.stdout.buffer, stderr=sys.stderr.buffer)
     proc.stdin.write((json.dumps(data) + '\n').encode()); proc.stdin.flush()

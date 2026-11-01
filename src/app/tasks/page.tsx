@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { workMessage, workFinished } from "@/lib/work";
 import { PlatformBadge, TaskStatusChip, TimeAgo } from "@/components/ui";
 import { PanelHeader } from "@/components/PanelHeader";
 import { CollapsibleMarkdown } from "@/components/Markdown";
@@ -8,91 +10,12 @@ import { PreviewDialog } from "@/components/PreviewDialog";
 import type { DryRunResult } from "@/lib/dry-run";
 import type { Task } from "@/lib/types";
 
-const PLATFORMS = ["any", "claude-code", "codex", "grok", "hermes", "cowork-cloud"];
-const REVIEWERS = ["", "codex", "claude-code", "grok"];
-
-function NewTaskForm({ onCreated, onCancel }: { onCreated: () => void; onCancel?: () => void }) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [project, setProject] = useState("");
-  const [platform, setPlatform] = useState("any");
-  const [reviewer, setReviewer] = useState("");
-  const [priority, setPriority] = useState(2);
-  const [state, setState] = useState<"idle" | "sending" | "error">("idle");
-
-  async function submit() {
-    if (!title.trim()) return;
-    setState("sending");
-    try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim() || undefined,
-          project: project.trim() || undefined,
-          platform,
-          priority,
-          reviewer_platform: reviewer || undefined,
-          created_by: "dashboard",
-        }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      setTitle("");
-      setDescription("");
-      setProject("");
-      setState("idle");
-      onCreated();
-    } catch {
-      setState("error");
-    }
-  }
-
-  const input =
-    "bg-[#0a0f1c] border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#2563eb] w-full";
-
-  return (
-    <div className="rounded-xl border border-white/10 bg-[#101828] p-4 mb-6">
-      <div className="text-sm font-semibold mb-3">Queue a task</div>
-      <div className="grid gap-3">
-        <input className={input} placeholder="Title — e.g. Fix the broken subscribe form on example.com"
-          value={title} onChange={(e) => setTitle(e.target.value)} />
-        <textarea className={`${input} min-h-20`} placeholder="Instructions (becomes the worker's prompt). Be specific: files, acceptance criteria, what done looks like."
-          value={description} onChange={(e) => setDescription(e.target.value)} />
-        <div className="grid gap-3 sm:grid-cols-4">
-          <input className={input} placeholder="Project (repo folder)" value={project}
-            onChange={(e) => setProject(e.target.value)} />
-          <select className={input} value={platform} onChange={(e) => setPlatform(e.target.value)}>
-            {PLATFORMS.map((p) => (
-              <option key={p} value={p}>run on: {p}</option>
-            ))}
-          </select>
-          <select className={input} value={reviewer} onChange={(e) => setReviewer(e.target.value)}>
-            {REVIEWERS.map((r) => (
-              <option key={r} value={r}>{r ? `review by: ${r}` : "no review"}</option>
-            ))}
-          </select>
-          <select className={input} value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
-            <option value={1}>priority: high</option>
-            <option value={2}>priority: normal</option>
-            <option value={3}>priority: low</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={submit} disabled={state === "sending" || !title.trim()}
-            className="text-sm px-4 py-2 rounded-lg bg-[#f44800] hover:bg-[#ff5a10] disabled:opacity-40 text-white font-semibold transition-colors">
-            {state === "sending" ? "Queuing…" : "Queue task"}
-          </button>
-          {onCancel && (
-            <button type="button" onClick={onCancel} className="ml-2 text-sm text-gray-500 transition-colors hover:text-gray-200">
-              Cancel
-            </button>
-          )}
-          {state === "error" && <span className="text-red-400 text-xs">Failed — try again.</span>}
-        </div>
-      </div>
-    </div>
-  );
+function NewTaskForm({ onCancel }: { onCreated: () => void; onCancel?: () => void }) {
+  return <div className="rounded-xl border border-white/10 bg-[#101828] p-4 mb-6">
+    <p className="mb-3 text-sm text-gray-300">Start a conversation, choose a project, and continue with follow-ups in Work.</p>
+    <Link href="/work" className="inline-block rounded-lg bg-[#f44800] px-4 py-2 text-sm font-semibold text-white">Start work</Link>
+    {onCancel && <button type="button" className="ml-4 text-sm text-gray-400" onClick={onCancel}>Close</button>}
+  </div>;
 }
 
 function TaskRow({ t, onAction, onCancelTask }: { t: Task; onAction: () => void; onCancelTask?: (task: Task) => void }) {
@@ -133,7 +56,7 @@ function TaskRow({ t, onAction, onCancelTask }: { t: Task; onAction: () => void;
               ✕
             </button>
           )}
-          {(t.status === "failed" || t.status === "cancelled") && (
+          {(t.status === "failed" || (t.status === "cancelled" && workFinished(t))) && (
             <button onClick={() => patch({ status: "queued" })}
               className="text-[11px] text-gray-500 hover:text-white transition-colors" title="Requeue">
               ↻
@@ -141,9 +64,10 @@ function TaskRow({ t, onAction, onCancelTask }: { t: Task; onAction: () => void;
           )}
         </div>
       </div>
+      <Link href={`/work?task=${t.id}`} className="mt-3 inline-block text-sm text-blue-300 underline">Open conversation</Link>
       {t.description && (
         <div className="mt-2">
-          <CollapsibleMarkdown source={t.description} className="text-sm leading-relaxed text-gray-400" />
+          <CollapsibleMarkdown source={workMessage(t)} className="text-sm leading-relaxed text-gray-400" />
         </div>
       )}
       {t.result && (

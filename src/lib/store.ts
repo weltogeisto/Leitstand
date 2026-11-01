@@ -1529,6 +1529,7 @@ export async function updateTask(input: {
             actor_type = case when ${hasActor} then ${actorType} else actor_type end,
             actor_id = case when ${hasActor} then ${actorId} else actor_id end
           where id = ${input.id}
+            and (status <> 'cancelled' or ${status}::text in ('queued', 'cancelled'))
           returning *
         ),
         logged as (
@@ -1571,6 +1572,7 @@ export async function updateTask(input: {
             actor_id = case when ${hasActor} then ${actorId} else actor_id end
           where t.id = ${input.id}
             and md5(t::text) = ${expected}
+            and (t.status <> 'cancelled' or ${status}::text in ('queued', 'cancelled'))
           returning *
         ),
         logged as (
@@ -1603,6 +1605,10 @@ export async function updateTask(input: {
     throw new Error(errMsg(e));
   }
   if (rows[0]) return asTask(rows[0]);
+  // An operator stop cannot be overwritten by a late worker completion.
+  // Returning the cancelled row lets the dispatcher acknowledge verified cleanup.
+  const cancelled = await getTask(input.id);
+  if (cancelled?.status === "cancelled" && status !== "queued" && status !== "cancelled") return cancelled;
   if (expected === undefined) throw new Error("Task not found");
   const current = await taskRevisionOf(input.id);
   if (!current) throw new Error("Task not found");

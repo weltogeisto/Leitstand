@@ -21,6 +21,7 @@ import { ACTIVITY_LIST, LIST_MAX } from "./list-params";
 import { RUNTIMES } from "./skills/types";
 import { WATCH_STATUSES } from "./watch";
 import { WATCH_SOURCES } from "./watch-sources";
+import { WORK_MESSAGE_LIMIT, WORK_PLATFORMS, WORK_PROJECTS } from "./work";
 import { GH_ACCEPTED_EVENTS, GH_WEBHOOK_BODY_MAX_BYTES } from "./gh-events";
 import { CONSUMER_ID, STREAM_FRAME_MAX, STREAM_HEARTBEAT_MS, STREAM_LIFETIME_MS } from "./events-stream";
 import { CITATION_MAX, PRINCIPAL_KINDS, PRS_MAX, QUEUE_CLASSIFICATIONS, REASON_MAX, REFS_MAX, SWEEP_OBSERVATION_KINDS } from "./sweep-evidence";
@@ -1642,6 +1643,12 @@ export function openApiDocument(): Json {
         }),
       },
       "/api/tasks/{id}": {
+        get: operation({
+          operationId: "getTask", tags: ["tasks"], summary: "Read one saved task and its result.",
+          description: "Requires a dashboard session or tasks:read credential.", security: cookieOrBearer,
+          parameters: [pathParam("id", "Task id.", { type: "integer", minimum: 1 })],
+          responses: { "200": jsonResponse("The saved task.", { type: "object", properties: { task: ref("Task") } }), ...flatErrors },
+        }),
         patch: operation({
           operationId: "updateTask",
           tags: ["tasks"],
@@ -1670,6 +1677,26 @@ export function openApiDocument(): Json {
             "404": jsonResponse("No task has this id when a database is connected. Also when expected_revision is present and the id is already gone.", ref("Error")),
             "409": staleWrite,
           },
+        }),
+      },
+      "/api/work": {
+        get: operation({
+          operationId: "getWorkConversation", tags: ["tasks"], summary: "Read a saved work conversation.", security: cookieOrBearer,
+          description: "Requires tasks:read. Returns up to 50 turns in chronological order, walking server-side parent links within the same project. earlier_task links to older history.",
+          parameters: [query("task", { type: "integer", minimum: 1 }, "Latest task id in the conversation.", { required: true })],
+          responses: { "200": jsonResponse("Saved turns.", { type: "object", properties: { tasks: { type: "array", items: ref("Task") }, earlier_task: { type: ["integer", "null"] } } }), ...flatErrors },
+        }),
+        post: operation({
+          operationId: "sendWorkMessage", tags: ["tasks"], summary: "Start work or send a follow-up.", security: cookieOrBearer,
+          description: "Requires tasks:write. Only registered projects and connected execution platforms are accepted. A parent must have finished and use the same project. Optional Idempotency-Key uses the task-creation replay guarantee. The PC dispatcher retrieves previous replies from server-side parent links.",
+          parameters: [{ name: "Idempotency-Key", in: "header", required: false, schema: { type: "string", maxLength: 200 } }],
+          requestBody: body({ type: "object", required: ["message", "project", "platform"], properties: {
+            message: { type: "string", minLength: 1, maxLength: WORK_MESSAGE_LIMIT },
+            project: { type: "string", enum: WORK_PROJECTS.map(p => p.id) },
+            platform: { type: "string", enum: WORK_PLATFORMS.map(p => p.id) },
+            parent_id: { type: ["integer", "null"], minimum: 1 },
+          } }),
+          responses: { "200": jsonResponse("Saved and queued task.", { type: "object", properties: { ok: { type: "boolean" }, task: ref("Task") } }), ...flatErrors },
         }),
       },
       "/api/decisions": {

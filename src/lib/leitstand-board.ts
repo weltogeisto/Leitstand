@@ -15,11 +15,15 @@ export function buildStrips(agents: FleetAgent[], tasks: Task[]): Strip[] {
     const status = a.derived_status;
     const bay: Bay = status === "waiting" ? "needs" : status === "failed" || status === "offline" ? "stuck" : status === "active" ? "moving" : "quiet";
     const session = a.current_session ?? a.recent_sessions?.[0];
+    const task = tasks.find(t => t.assigned_agent === a.id && ["claimed", "running", "review"].includes(t.status));
+    const canWork = ["codex", "claude-code"].includes(a.platform);
     return { id: `agent:${a.id}`, source: sourceFor(`${a.platform} ${a.id}`), bay,
       who: a.display_name || a.id,
       title: status === "offline" ? "No recent heartbeat" : session?.summary || (status === "active" ? "Session active" : status === "waiting" ? "Waiting for input" : status === "failed" ? "Session failed" : "Ready when needed"),
       text: [a.machine, session?.project].filter(Boolean).join(" · ") || "Status reporting connected",
-      at: a.last_seen_at, href: `/history?agent=${encodeURIComponent(a.id)}`, action: "View activity" };
+      at: a.last_seen_at,
+      href: task ? `/work?task=${task.id}` : canWork ? `/work?agent=${encodeURIComponent(a.platform)}` : `/history?agent=${encodeURIComponent(a.id)}`,
+      action: task ? "Open work" : canWork ? "Start work" : "View activity" };
   });
   for (const t of tasks) {
     if (["done", "cancelled"].includes(t.status)) continue;
@@ -29,7 +33,7 @@ export function buildStrips(agents: FleetAgent[], tasks: Task[]): Strip[] {
       bay: t.status === "review" ? "needs" : t.status === "failed" ? "stuck" : ["running", "claimed"].includes(t.status) ? "moving" : "quiet",
       who: `Task #${t.id} · ${t.platform}`, title: t.title,
       text: `${t.status}${t.project ? ` · ${t.project}` : ""}`, at: t.updated_at,
-      href: "/tasks", action: t.status === "review" ? "Review task" : "Open task" });
+      href: `/work?task=${t.id}`, action: t.status === "review" ? "Review task" : "Open work" });
   }
   return strips.sort((a,b) => (Date.parse(b.at || "") || 0) - (Date.parse(a.at || "") || 0));
 }

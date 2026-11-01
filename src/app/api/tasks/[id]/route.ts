@@ -6,11 +6,22 @@ import { diffTaskUpdate, readDryRun, readExpectedRevision, refusedDryRun } from 
 import { previewTaskChange } from "@/lib/dry-run-actions";
 import { demoGetTask, demoUpdateTaskGuarded } from "@/lib/demo-store";
 import { taskRevision } from "@/lib/revision";
-import { updateTask, report } from "@/lib/store";
+import { getTask, updateTask, report } from "@/lib/store";
 import type { TaskStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const denied = await enforceApi(req);
+  if (denied) return denied;
+  const id = Number((await ctx.params).id);
+  if (!Number.isSafeInteger(id) || id < 1) return apiError("validation_failed", { message: "Invalid task id." });
+  try {
+    const task = isConfigured() ? await getTask(id) : await demoGetTask(id);
+    return task ? NextResponse.json({ task }) : apiError("task_not_found");
+  } catch (e) { return publicError("[tasks] read failed", e); }
+}
 
 /**
  * PATCH /api/tasks/:id { status?, result?, cost_usd?, session_id?, assigned_agent?, agent_id?, dry_run?, expected_revision? }
@@ -141,8 +152,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (body.status && body.agent_id) {
       await report({
         agent_id: body.agent_id,
-        kind: body.status === "failed" ? "error" : "status",
-        title: `Task #${task.id} → ${body.status}: ${task.title}`,
+        kind: task.status === "failed" ? "error" : "status",
+        title: `Task #${task.id} → ${task.status}: ${task.title}`,
         detail: { task_id: task.id, cost_usd: body.cost_usd },
       });
     }

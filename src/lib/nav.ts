@@ -1,6 +1,7 @@
 /** Main navigation links, in display order. */
 export const NAV_LINKS: { href: string; label: string; accent?: boolean }[] = [
   { href: "/", label: "Fleet" },
+  { href: "/work", label: "Work" },
   { href: "/progress", label: "Progress" },
   { href: "/usage", label: "Usage and Costs" },
   { href: "/tasks", label: "Tasks" },

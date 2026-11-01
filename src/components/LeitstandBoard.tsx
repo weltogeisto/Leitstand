@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useFleet } from "./use-fleet";
 import { buildStrips, type Bay, type Source, type Strip } from "@/lib/leitstand-board";
 import type { Task } from "@/lib/types";
+import { WORK_PROJECTS } from "@/lib/work";
 import "./leitstand.css";
 
 type Project = { name: string; repo: string; description: string | null; url: string; language: string | null; pushed_at: string; archived: boolean; fork: boolean; open_items: number };
@@ -74,6 +75,7 @@ export default function LeitstandBoard() {
   const dormant=(p:Project)=>p.archived||(now>0&&now-Date.parse(p.pushed_at)>30*86400000&&!projectActivity(p));
   const shownProjects=projects.filter(p=>showDormant||!dormant(p));
   const selected=shownProjects.find(p=>p.repo===picked)??shownProjects[0];
+  const workProject=selected?WORK_PROJECTS.find(p=>p.repository.toLowerCase()===selected.repo.toLowerCase()):null;
   const chips:(Source|"all")[]=["all","claude","openai","hermes","jobs"];
   function ask(e:React.FormEvent){
     e.preventDefault();const q=query.toLowerCase();
@@ -83,7 +85,8 @@ export default function LeitstandBoard() {
   }
   return <div className="leitstand"><div className="ls-wrap">
     <header className="ls-header"><div className="ls-brand"><Link href="/">Leitstand</Link><span>{now?new Date(now).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}):""}</span><span className="ls-live-label"><i className={data&&!error?"ls-live":""}/>{data&&!error?"Live":error?"Disconnected":"Connecting"}</span></div><form className="ls-ask" onSubmit={ask}><label className="sr-only" htmlFor="ls-ask">Ask the Leitstand status board</label><input id="ls-ask" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Ask: what is waiting on me?"/><button disabled={!query.trim()}>Ask</button></form></header>
-    <nav className="ls-nav" aria-label="Leitstand"><Link href="/tasks">Tasks</Link><Link href="/history">History</Link><Link href="/progress">Progress</Link><Link href="/settings">Settings</Link><Link href="/security">Security</Link><Link href="/help">Help</Link></nav>
+    <nav className="ls-nav" aria-label="Leitstand"><Link href="/work">Work</Link><Link href="/history">History</Link><Link href="/progress">Progress</Link><Link href="/settings">Settings</Link><Link href="/security">Security</Link><Link href="/help">Help</Link></nav>
+    <section className="ls-work-launch"><div><h2>What would you like to work on?</h2><p>Give Codex or Claude instructions, read the reply, and send follow-ups here.</p></div><Link className="ls-action ls-primary" href="/work">Start work →</Link></section>
     {answer&&<div className="ls-answer" role="status">{answer}<button aria-label="Dismiss answer" onClick={()=>setAnswer("")}>×</button></div>}
     {(error||taskError||data?.demo)&&<div className="ls-notice" role="alert">{error?"Fleet connection interrupted. Showing last received data. ":""}{taskError}{data?.demo?" Demo data — no live database is connected.":""}</div>}
     <section className="ls-intro"><div><h1>{headline}</h1><p>{!data?"Waiting for the first live status update.":error||taskError?"Some sources are unavailable. Check the connection notices.":stuck?`${stuck} ${stuck===1?"signal needs":"signals need"} checking. The board shows what was last reported.`:"Your agents and projects, in one place."}</p></div><div className="ls-chips" aria-label="Filter by source">{chips.map(k=><button key={k} aria-pressed={filter===k} onClick={()=>setFilter(k)}>{k==="all"?"All":SOURCES[k].label}<span>{strips.filter(s=>k==="all"||s.source===k).length}</span>{k!=="all"&&strips.some(s=>s.source===k&&s.bay==="needs")?<i aria-label="needs you"/>:null}</button>)}</div></section>
@@ -91,6 +94,7 @@ export default function LeitstandBoard() {
     <section className="ls-projects"><div className="ls-projects-head"><h2>Projects</h2><p>{projects.length?`${projects.filter(p=>projectActivity(p)>0).length} with active agents · ${projects.length} public repositories. Select a project for details.`:reposLoaded?"No public repositories found.":"Loading repositories…"}</p></div>{repoError&&<p role="status">{repoError}</p>}
       <div className="ls-project-layout"><div className="ls-apps">{shownProjects.map((p,i)=><button key={p.repo} className="ls-app" aria-pressed={selected?.repo===p.repo} onClick={()=>setPicked(p.repo)}><span className="ls-app-icon" style={{background:COLORS[i%COLORS.length]}}>{(PROJECT_LABELS[p.name]||p.name).split(/[- _]/).slice(0,2).map(s=>s[0]).join("").toUpperCase()}{p.open_items>0&&<b aria-label={`${p.open_items} open issues and pull requests`}>{p.open_items}</b>}</span><span>{PROJECT_LABELS[p.name]||p.name}</span></button>)}{projects.some(dormant)&&<button className="ls-app" aria-pressed={showDormant} onClick={()=>setShowDormant(!showDormant)}><span className="ls-app-icon ls-dormant">{COLORS.map(c=><i key={c} style={{background:c}}/>)}</span><span>{showDormant?"Hide dormant":`Dormant ${projects.filter(dormant).length}`}</span></button>}</div>
       {selected&&<article className="ls-project-detail"><h3>{PROJECT_LABELS[selected.name]||selected.name}</h3><small>{selected.language||"No language listed"} · pushed {age(selected.pushed_at,now).join(" ")} ago{selected.fork?" · fork":""}</small><p>{selected.description||"This repository has no description yet."}</p><div className="ls-next"><small>Next step</small><p>{selected.archived?"Archived on GitHub. Read the existing work before deciding whether to resume it.":selected.open_items>0?`Review ${selected.open_items} open ${selected.open_items===1?"issue or pull request":"issues and pull requests"} on GitHub.`:!selected.description?"Add a repository description so its purpose is clear.":"No open issues or pull requests. Review the repository and choose its next task."}</p></div><a className="ls-action" href={selected.url} target="_blank" rel="noreferrer">Open on GitHub ↗</a></article>}</div>
-    </section><footer className="ls-footer">Installed reporters send status metadata without prompt text. Project metadata refreshes every 15 minutes. <Link href="/settings">Manage connections</Link></footer>
+      {workProject&&<Link className="ls-action ls-primary" href={`/work?project=${encodeURIComponent(workProject.id)}`}>Work on {workProject.name} →</Link>}
+    </section><footer className="ls-footer">Installed reporters send status metadata without prompt text. Instructions you send through Work and agent replies are saved in your private task queue. <Link href="/settings">Manage connections</Link></footer>
   </div></div>;
 }

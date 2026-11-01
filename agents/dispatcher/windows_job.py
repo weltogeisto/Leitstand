@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from process_control import wait
 
 if sys.platform == "win32":
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -34,7 +35,7 @@ def checked(ok):
     if not ok:
         raise ctypes.WinError(ctypes.get_last_error())
 
-def run(cmd, cwd, timeout, *, env):
+def run(cmd, cwd, timeout, *, env, cancel_event=None):
     job = kernel.CreateJobObjectW(None, None)
     checked(job)
     proc = None
@@ -51,7 +52,7 @@ def run(cmd, cwd, timeout, *, env):
             proc.stdin.write(json.dumps(cmd).encode("utf-8"))
             proc.stdin.close()
             try:
-                code = proc.wait(timeout=timeout)
+                code = wait(proc, timeout, cancel_event)
             finally:
                 checked(kernel.TerminateJobObject(job, 1))
                 deadline = time.monotonic() + 5

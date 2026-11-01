@@ -78,6 +78,9 @@ import uuid
 from pathlib import Path
 
 import ak_pointers
+from process_control import RunCancelled, wait as wait_process
+
+CURRENT_RUN = threading.local()
 
 
 def load_env_file() -> None:
@@ -166,10 +169,16 @@ def ingest(kind: str, title: str, agent_id: str, platform: str, detail: dict | N
 
 def build_prompt(task: dict, pointers: bool = False) -> str:
     lines = [
-        f"You are running as an autonomous worker dispatched by Agent Kontrol (task #{task['id']}).",
+        f"You are working with the user inside Leitstand (task #{task['id']}).",
         f"Task: {task['title']}",
     ]
-    if task.get("description"):
+    envelope = work_turn(task)
+    if envelope:
+        history = conversation_context(task)
+        if history:
+            lines.append("Previous turns in this conversation (up to 12 recent turns):\n" + history)
+        lines.append("The user's current message:\n" + envelope["message"])
+    elif task.get("description"):
         lines.append(f"Instructions:\n{task['description']}")
     if pointers:
         lines.append(
@@ -178,10 +187,52 @@ def build_prompt(task: dict, pointers: bool = False) -> str:
             "read it, but do not edit, stage, or commit it. The dispatcher removes it when you finish."
         )
     lines.append(
-        "Work autonomously — do not wait for human input. When done, print a summary block:\n"
-        "RESULT: <3-6 lines: what you did, what changed, anything left>"
+        "Answer the user and carry out the requested work in this project. Previous file changes "
+        "are kept in this workspace. Follow the current request; do not repeat completed work. "
+        "If you need a decision, explain the exact question in your final reply; the user can send "
+        "a follow-up in Leitstand. Do not start an interactive terminal prompt. Do not publish, "
+        "push, or deploy unless the user explicitly requested it and the necessary access is available. "
+        "Finish with RESULT: followed by your complete user-facing answer, including what changed, "
+        "validation, and any limitation. Your reply is shown directly to the user."
     )
     return "\n\n".join(lines)
+
+
+def work_turn(task: dict) -> dict | None:
+    try:
+        value = json.loads(task.get("description") or "")
+        if not isinstance(value, dict) or value.get("leitstand_work") != 1 or not isinstance(value.get("message"), str) or len(value["message"]) > 12000:
+            return None
+        for key in ("parent_id", "thread_id"):
+            if value.get(key) is not None and (type(value[key]) is not int or value[key] < 1):
+                return None
+        return value
+    except (ValueError, TypeError):
+        return None
+
+
+def conversation_context(task: dict) -> str:
+    turns = []
+    current = task
+    remaining = 80000
+    for _ in range(12):
+        parent = (work_turn(current) or {}).get("parent_id")
+        if not parent:
+            break
+        if parent >= current["id"]:
+            raise ValueError("Invalid conversation parent")
+        previous = api(f"/api/tasks/{parent}", None, "GET", max_bytes=256000).get("task")
+        if not previous or previous.get("project") != task.get("project"):
+            raise ValueError("Conversation history is unavailable for this project")
+        envelope = work_turn(previous)
+        message = envelope["message"] if envelope else previous.get("description") or previous["title"]
+        content = f"User:\n{message}\n\nAgent ({previous.get('status')}):\n{previous.get('result') or '(no reply)'}"
+        if len(content) > remaining:
+            break
+        turns.insert(0, content)
+        remaining -= len(content)
+        current = previous
+    return "\n\n---\n\n".join(turns)
 
 
 def build_review_prompt(task: dict, worker_output: str) -> str:
@@ -309,7 +360,7 @@ def run_contained(cmd: list[str], cwd: Path, timeout: float) -> tuple[int, str, 
     """
     if os.name == "nt":
         from windows_job import run
-        return run(cmd, cwd, timeout, env=worker_environment())
+        return run(cmd, cwd, timeout, env=worker_environment(), cancel_event=getattr(CURRENT_RUN, "cancel_event", None))
     with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
         proc = subprocess.Popen(
             cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out_f, stderr=err_f,
@@ -317,13 +368,13 @@ def run_contained(cmd: list[str], cwd: Path, timeout: float) -> tuple[int, str, 
         )
         timed_out = False
         try:
-            returncode = proc.wait(timeout=timeout)
+            returncode = wait_process(proc, timeout, getattr(CURRENT_RUN, "cancel_event", None))
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:
             stopped = stop_group(proc, KILL_GRACE)
-        if not stopped:
-            raise ContainmentError(f"process group {proc.pid} still had members after SIGKILL")
+            if not stopped:
+                raise ContainmentError(f"process group {proc.pid} still had members after SIGKILL")
         if timed_out:
             raise subprocess.TimeoutExpired(cmd, timeout)
         out_f.seek(0)
@@ -396,7 +447,7 @@ def extract_result(output: str) -> str:
     marker = "RESULT:"
     idx = output.rfind(marker)
     text = output[idx + len(marker):].strip() if idx >= 0 else output
-    return text[-1500:] if len(text) > 1500 else text
+    return text[:24000] + "\n\n[Reply shortened at 24,000 characters. Ask a follow-up for the remaining detail.]" if len(text) > 24000 else text
 
 
 class DispatchRefused(Exception):
@@ -557,14 +608,65 @@ def committed_metadata(cwd: Path, base_head: str | None, block: str) -> str | No
 
 
 def fail_task(tid: object, agent_id: str, reason: str) -> None:
-    api(f"/api/tasks/{tid}", {"status": "failed", "agent_id": agent_id, "result": reason}, "PATCH")
+    finish_task(tid, {"status": "failed", "agent_id": agent_id, "result": reason})
+
+
+def finish_task(tid: object, body: dict) -> None:
+    response = api(f"/api/tasks/{tid}", body, "PATCH")
+    # A concurrent operator stop wins over completion. At this boundary the CLI
+    # and all of its children have already been stopped and cleanup verified.
+    if response.get("task", {}).get("status") == "cancelled" and body.get("status") != "cancelled":
+        api(f"/api/tasks/{tid}", {"status": "cancelled", "agent_id": body.get("agent_id"),
+            "result": "[stopped] Work stopped. Changes already made remain in the project workspace."}, "PATCH")
+
+
+class CancellationWatch:
+    def __init__(self, tid: int):
+        self.tid = tid
+        self.cancel = threading.Event()
+        self.done = threading.Event()
+        self.thread = threading.Thread(target=self.poll, daemon=True, name=f"work-stop-{tid}")
+
+    def check(self):
+        task = api(f"/api/tasks/{self.tid}", None, "GET", max_bytes=256000).get("task")
+        if not task:
+            raise ValueError("Task state unavailable")
+        if task.get("status") == "cancelled":
+            self.cancel.set()
+
+    def poll(self):
+        # One active worker checks six times/minute; together with heartbeats
+        # this stays within the default 10,000-request daily credential budget.
+        while not self.done.wait(10):
+            try:
+                self.check()
+                if self.cancel.is_set():
+                    return
+            except Exception:
+                # Bounded API timeout; a transient network failure never revives
+                # a cancelled task. The normal task timeout remains in force.
+                pass
+
+    def start(self):
+        self.check()  # Fail closed before launching when the task cannot be read.
+        CURRENT_RUN.cancel_event = self.cancel
+        if self.cancel.is_set():
+            raise RunCancelled()
+        self.thread.start()
+
+    def stop(self):
+        self.done.set()
+        CURRENT_RUN.cancel_event = None
 
 
 def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
     agent_id = f"{platform}-{HOSTNAME}"
     tid = task["id"]
     lock: WorktreeLock | None = None
+    cancellation = CancellationWatch(tid) if os.environ.get("MC_CANCELLATION_ENABLED") == "1" else None
     try:
+        if cancellation:
+            cancellation.start()
         project = task.get("project")
         runtime = RUNTIME_FOR_PLATFORM.get(platform)
         try:
@@ -575,6 +677,12 @@ def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
                     "task.project is required and is the skill lane: 1-100 characters of letters, "
                     f"digits, and . _ : / - starting with a letter or digit (got {project!r})"
                 )
+            registry = os.environ.get("MC_WORKSPACE_REGISTRY")
+            if registry:
+                from workspaces import prepare
+                prepare(project, WORKDIR, registry, os.environ["MC_REPOSITORIES_DIR"])
+            if cancellation and cancellation.cancel.is_set():
+                raise RunCancelled()
             cwd = resolve_project(project, WORKDIR)
             candidate = WorktreeLock(linked_worktree_git_dir(cwd))
             candidate.acquire(cwd)
@@ -602,7 +710,9 @@ def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
 
         cleanup_error: str | None = None
         try:
-            api(f"/api/tasks/{tid}", {"status": "running", "agent_id": agent_id}, "PATCH")
+            progress = api(f"/api/tasks/{tid}", {"status": "running", "agent_id": agent_id}, "PATCH")
+            if progress.get("task", {}).get("status") == "cancelled":
+                raise RunCancelled()
             ingest("status", f"Running task #{tid}: {task['title']}", agent_id, platform, {"task_id": tid})
             ok, output, cost = run_cli(platform, build_prompt(task, injection.changed and block != ""), cwd)
         finally:
@@ -653,17 +763,25 @@ def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
         }
         if cost is not None:
             body["cost_usd"] = round(float(cost), 4)
-        api(f"/api/tasks/{tid}", body, "PATCH")
+        finish_task(tid, body)
+    except RunCancelled:
+        api(f"/api/tasks/{tid}", {"status": "cancelled", "agent_id": agent_id,
+            "result": "[stopped] Work stopped. Changes already made remain in the project workspace. You can send a follow-up."}, "PATCH")
     except Exception as e:
         if isinstance(e, ContainmentError) and lock is not None:
             lock.quarantine()
         try:
-            api(f"/api/tasks/{tid}", {
-                "status": "failed", "result": f"dispatcher error: {e}", "agent_id": agent_id,
-            }, "PATCH")
+            if isinstance(e, ContainmentError):
+                current = api(f"/api/tasks/{tid}", None, "GET").get("task", {})
+                api(f"/api/tasks/{tid}", {"status": "cancelled" if current.get("status") == "cancelled" else "failed",
+                    "result": f"dispatcher error: {e}. Worker cleanup could not be verified. This workspace is locked until the PC operator checks it.", "agent_id": agent_id}, "PATCH")
+            else:
+                finish_task(tid, {"status": "failed", "result": f"dispatcher error: {e}", "agent_id": agent_id})
         except Exception:
             pass
     finally:
+        if cancellation:
+            cancellation.stop()
         try:
             if lock is not None:
                 lock.release()

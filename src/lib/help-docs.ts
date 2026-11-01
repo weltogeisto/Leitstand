@@ -14,6 +14,7 @@ export interface HelpDoc {
 }
 
 export const HELP_DOCS: HelpDoc[] = [
+  { slug: "work", title: "Work with your agents", file: "docs/WORK.md", blurb: "Start work, read replies, send follow-ups, and stop a run from your phone." },
   { slug: "deploy", title: "Deploy and operate", file: "docs/DEPLOY.md", blurb: "One-line install, deployment targets, environment variables, upgrades." },
   { slug: "agents", title: "Connect agents", file: "docs/AGENTS.md", blurb: "Every adapter and what each one can do." },
   { slug: "mcp", title: "MCP tools", file: "docs/MCP.md", blurb: "The 24 tools and how to connect an MCP host." },
