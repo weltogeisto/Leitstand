@@ -56,9 +56,12 @@ Or install the launchd plist — see agents/dispatcher/README.md. Stdlib only.
 # importable on Python 3.9, which is still the system python3 on macOS.
 from __future__ import annotations
 
-import fcntl
 import json
 import os
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 import re
 import shutil
 import signal
@@ -284,6 +287,9 @@ def run_contained(cmd: list[str], cwd: Path, timeout: float) -> tuple[int, str, 
     exception, so none of them outlives the worktree lock. Output goes to temp
     files rather than pipes, so a child holding stdout open does not stall the wait.
     """
+    if os.name == "nt":
+        from windows_job import run
+        return run(cmd, cwd, timeout)
     with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
         proc = subprocess.Popen(
             cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out_f, stderr=err_f,
@@ -325,6 +331,10 @@ def run_cli(platform: str, prompt: str, cwd: Path, review: bool = False) -> tupl
         cmd = ["grok", "-p", prompt] + ([] if review else extra)
     else:
         return False, f"no CLI runner for platform {platform}", None
+
+    configured_cli = os.environ.get(f"MC_{platform.split('-')[0].upper()}_CLI")
+    if configured_cli:
+        cmd[0] = configured_cli
 
     try:
         returncode, stdout, stderr = run_contained(cmd, cwd, TASK_TIMEOUT)
@@ -380,7 +390,7 @@ def resolve_project(project: object, workdir: Path) -> Path:
             raise DispatchRefused(f"project folder not found on {HOSTNAME}: {root / project}") from None
         except OSError as e:
             raise DispatchRefused(f"cannot inspect {cur}: {e.strerror}") from e
-        if stat.S_ISLNK(st.st_mode):
+        if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400:
             raise DispatchRefused(f"task.project goes through a symlink: {cur}")
         if not stat.S_ISDIR(st.st_mode):
             raise DispatchRefused(f"task.project is not a directory: {cur}")
@@ -436,7 +446,11 @@ class WorktreeLock:
     def acquire(self, worktree: Path) -> None:
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if os.name == "nt":
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             os.close(fd)
             raise DispatchRefused(
@@ -447,7 +461,11 @@ class WorktreeLock:
     def release(self) -> None:
         if self.fd is not None:
             try:
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
+                if os.name == "nt":
+                    os.lseek(self.fd, 0, os.SEEK_SET)
+                    msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
             finally:
                 os.close(self.fd)
                 self.fd = None
