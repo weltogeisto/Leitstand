@@ -297,7 +297,7 @@ export function CredentialSettings() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-400">
-        Each credential is a separate bearer token. The token is shown once. Agent Kontrol stores
+        Each credential is a separate bearer token. The token is shown once. Leitstand stores
         the label, an 8-character prefix, a hash of the token, the scopes, and timestamps. It does
         not store the token. Each credential also has request limits: one request is one HTTP call
         made with the token, including each MCP request. Over a limit, the call answers 429 with
