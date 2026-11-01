@@ -13,7 +13,7 @@ export function buildStrips(agents: FleetAgent[], tasks: Task[]): Strip[] {
   const strips: Strip[] = agents.map(a => {
     const status = a.derived_status;
     const bay: Bay = status === "waiting" ? "needs" : status === "failed" || status === "offline" ? "stuck" : status === "active" ? "moving" : "quiet";
-    const session = a.current_session;
+    const session = a.current_session ?? a.recent_sessions?.[0];
     return { id: `agent:${a.id}`, source: sourceFor(`${a.platform} ${a.id}`), bay,
       who: a.display_name || a.id,
       title: status === "offline" ? "No recent heartbeat" : session?.summary || (status === "active" ? "Session active" : status === "waiting" ? "Waiting for input" : status === "failed" ? "Session failed" : "Ready when needed"),
