@@ -15,3 +15,12 @@ test("running task represented by an agent is not counted twice",()=>{
   const t={id:1,platform:"codex",status:"running",assigned_agent:"c"} as Task;
   assert.equal(buildStrips([a],[t]).length,1);
 });
+test("idle and failed topic cards retain their latest status summary",()=>{
+  const a={id:"hermes-topic",platform:"hermes",derived_status:"done",current_session:null,
+    recent_sessions:[{summary:"Idle — no active turn",project:"Hermes_Hegel topic"}]} as FleetAgent;
+  assert.equal(buildStrips([a],[])[0].title,"Idle — no active turn");
+  a.derived_status="failed";
+  a.recent_sessions[0].summary="Status metadata unavailable";
+  assert.equal(buildStrips([a],[])[0].title,"Status metadata unavailable");
+  assert.equal(buildStrips([a],[])[0].bay,"stuck");
+});
