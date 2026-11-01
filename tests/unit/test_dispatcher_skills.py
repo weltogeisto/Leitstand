@@ -975,6 +975,15 @@ class TestProcessContainment(Harness):
         })
         env.start()
         self.addCleanup(env.stop)
+        # The fake CLI uses explicit test controls; the production environment
+        # allowlist intentionally strips arbitrary variables from real workers.
+        real_worker_environment = md.worker_environment
+        controls = mock.patch.object(md, "worker_environment", side_effect=lambda: {
+            **real_worker_environment(),
+            **{key: value for key, value in os.environ.items() if key.startswith("FAKE_")},
+        })
+        controls.start()
+        self.addCleanup(controls.stop)
         for p in (mock.patch.object(md, "run_cli", REAL_RUN_CLI),
                   mock.patch.object(md, "TASK_TIMEOUT", 0.5),
                   mock.patch.object(md, "KILL_GRACE", 0.5)):

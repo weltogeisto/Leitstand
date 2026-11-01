@@ -4,6 +4,7 @@ import { useState } from "react";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -11,13 +12,15 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    try {
     const res = await fetch("/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ password, code }),
     });
     if (res.ok) {
-      window.location.href = "/";
+      const next = new URLSearchParams(window.location.search).get("next");
+      window.location.href = next?.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/";
     } else if (res.status === 429) {
       const header = res.headers.get("Retry-After");
       const seconds = header !== null ? Number(header) : Number.NaN;
@@ -26,11 +29,11 @@ export default function LoginPage() {
           ? `Too many attempts. Try again in ${seconds} seconds.`
           : "Too many attempts. Try again in a few minutes."
       );
-      setBusy(false);
     } else {
-      setError("Wrong password.");
-      setBusy(false);
+      setError(res.status === 503 ? "Sign-in is temporarily unavailable. Please try again." : "Password or verification code is incorrect.");
     }
+    } catch { setError("Could not reach Leitstand. Please try again."); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -46,12 +49,15 @@ export default function LoginPage() {
         <input
           id="password"
           type="password"
+          autoComplete="current-password"
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="w-full bg-[#0a0f1c] border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#2563eb] mb-3"
         />
-        {error && <div className="text-red-400 text-sm mb-3">{error}</div>}
+        <label className="block text-sm text-gray-400 mb-2" htmlFor="code">Authenticator or recovery code (if enabled)</label>
+        <input id="code" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} className="w-full bg-[#0a0f1c] border border-white/10 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#2563eb] mb-3" />
+        {error && <div role="alert" className="text-red-400 text-sm mb-3">{error}</div>}
         <button
           type="submit"
           disabled={busy || !password}

@@ -1,6 +1,6 @@
-import { authCookieValue, verifyAuthCookie, DASHBOARD_SESSION_SECONDS, validRequestOrigin, randomToken, secretsMatch } from "@/lib/authcrypto";
+import { authCookieValue, DASHBOARD_SESSION_SECONDS, validRequestOrigin, randomToken, secretsMatch } from "@/lib/authcrypto";
 import { clientIp } from "@/lib/rate-limit";
-import { loginLimiter } from "@/lib/login-limiter";
+import { reserveLoginAttempt, clearLoginAttempts, checkSecondFactor, verifyDashboardCookie } from "@/lib/dashboard-security";
 import { escapeHtml, isAllowedRedirectUri, resource as mcpResource } from "@/lib/oauth";
 import { isConfigured, sql } from "@/lib/db";
 
@@ -30,7 +30,7 @@ type AuthParams = {
 function htmlResponse(body: string, status = 200): Response {
   return new Response(body, {
     status,
-    headers: { "Content-Type": "text/html; charset=utf-8" },
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
   });
 }
 
@@ -88,7 +88,7 @@ function consentPage(
 <body>
   <div class="card">
     <h1>Authorize MCP client</h1>
-    <p><strong>${escapeHtml(clientName)}</strong> wants access to Agent Kontrol MCP
+    <p><strong>${escapeHtml(clientName)}</strong> wants access to Leitstand MCP
     with scope <code>${escapeHtml(params.scope || "mcp")}</code>.</p>
     ${error ? `<div class="err">${escapeHtml(error)}</div>` : ""}
     <form method="post" action="/oauth/authorize">
@@ -104,7 +104,9 @@ function consentPage(
         authenticated
           ? `<p class="meta">You're signed in to the dashboard. Click Approve to grant this client access.</p>`
           : `<label for="password">Dashboard password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus />`
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus />
+      <label for="code" style="margin-top:1rem">Authenticator or recovery code (if enabled)</label>
+      <input id="code" name="code" type="text" autocomplete="one-time-code" />`
       }
       <button type="submit">Approve</button>
     </form>
@@ -143,6 +145,9 @@ async function validateParams(
 ): Promise<{ ok: true; params: AuthParams; client: OAuthClient } | { ok: false; response: Response }> {
   if (!isConfigured()) {
     return { ok: false, response: errorPage("OAuth storage is not configured", 503) };
+  }
+  if (!process.env.MC_DASHBOARD_PASSWORD && (process.env.NODE_ENV === "production" || process.env.MC_MFA_ENABLED === "1")) {
+    return { ok: false, response: errorPage("Dashboard sign-in is not configured", 503) };
   }
 
   const {
@@ -218,7 +223,7 @@ async function hasValidDashboardSession(req: Request): Promise<boolean> {
   let cookie = "";
   try { cookie = match?.[1] ? decodeURIComponent(match[1]) : ""; } catch { return false; }
   if (!cookie) return false;
-  return validRequestOrigin(req) && verifyAuthCookie(cookie, password);
+  return validRequestOrigin(req) && verifyDashboardCookie(cookie, password);
 }
 
 async function mintCodeAndRedirect(params: AuthParams, req: Request): Promise<Response> {
@@ -299,39 +304,45 @@ export async function POST(req: Request) {
   // budget as the dashboard login. A request with a session never touches it.
   const ip = clientIp(req);
   let passwordOk = false;
+  let sessionEpoch = "0";
   if (submitted.length > 0) {
     const throttled = !hasSession;
     if (throttled) {
-      const { allowed, retryAfterSec } = loginLimiter.check(ip);
+      let limit;
+      try { limit = await reserveLoginAttempt(ip); } catch { return errorPage("Sign-in is temporarily unavailable", 503); }
+      const { allowed, retryAfterSec } = limit;
       if (!allowed) {
         return consentPage(params, client.client_name || client.client_id, {
           authenticated: false,
           error: `Too many attempts. Try again in ${retryAfterSec} seconds.`,
         });
       }
-      // Reserve the attempt synchronously, before the await below, so a
-      // concurrent burst cannot pass the check.
-      loginLimiter.fail(ip);
     }
     passwordOk = await secretsMatch(submitted, password);
-    if (throttled && passwordOk) loginLimiter.reset(ip);
+    if (passwordOk && !hasSession) {
+      try {
+        const factor = await checkSecondFactor(form.get("code") ?? "");
+        passwordOk = factor.ok; sessionEpoch = factor.epoch;
+        if (passwordOk) await clearLoginAttempts(ip);
+      } catch { return errorPage("Sign-in is temporarily unavailable", 503); }
+    }
   }
 
   if (!hasSession && !passwordOk) {
     return consentPage(params, client.client_name || client.client_id, {
       authenticated: false,
-      error: submitted ? "Wrong password" : "Password required",
+      error: submitted ? "Password or verification code is incorrect" : "Password required",
     });
   }
 
   const res = await mintCodeAndRedirect(params, req);
-  if (!passwordOk) {
+  if (!passwordOk || hasSession) {
     // Approved via an existing session — no new cookie needed.
     return res;
   }
   // Password approval — (re)establish the dashboard session cookie.
   const headers = new Headers(res.headers);
-  const cookieVal = await authCookieValue(password);
+  const cookieVal = await authCookieValue(password, sessionEpoch);
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   headers.append(
     "Set-Cookie",

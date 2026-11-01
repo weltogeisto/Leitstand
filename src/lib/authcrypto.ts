@@ -36,26 +36,29 @@ async function dashboardSignature(payload: string, password: string): Promise<st
     false,
     ["sign"]
   );
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(`mc-cookie-v2:${payload}:${password}`));
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(`mc-cookie-v3:${payload}:${password}`));
   return base64url(sig);
 }
 
 /** Unique signed session; rotating the password or cookie secret revokes all sessions. */
-export async function authCookieValue(password: string): Promise<string> {
+export async function authCookieValue(password: string, epoch = "0"): Promise<string> {
   const issued = Math.floor(Date.now() / 1000);
-  const payload = `v2.${issued}.${randomToken(16)}`;
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(epoch)) throw new Error("Invalid session epoch");
+  const payload = `v3.${issued}.${randomToken(16)}.${epoch}`;
   return `${payload}.${await dashboardSignature(payload, password)}`;
 }
 
 /** Old perpetual cookies, malformed cookies, future issuance and expired sessions fail closed. */
 export async function verifyAuthCookie(cookie: string, password: string): Promise<boolean> {
-  const match = /^(v2\.(\d{10})\.[A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})$/.exec(cookie);
+  const match = /^(v3\.(\d{10})\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{1,64})\.([A-Za-z0-9_-]{43})$/.exec(cookie);
   if (!match) return false;
   const issued = Number(match[2]);
   const now = Math.floor(Date.now() / 1000);
   if (issued > now + 30 || now >= issued + DASHBOARD_SESSION_SECONDS) return false;
   return secretsMatch(match[3], await dashboardSignature(match[1], password));
 }
+
+export function authCookieEpoch(cookie: string): string { return cookie.split(".")[3] ?? ""; }
 
 /** Cookie-authenticated mutations must come from this application's origin. */
 export function validRequestOrigin(req: Request): boolean {

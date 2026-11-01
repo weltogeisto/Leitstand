@@ -48,6 +48,11 @@ export function isUnprotectedWithRealData(): boolean {
 }
 
 export async function middleware(req: NextRequest) {
+  const next = () => {
+    const headers = new Headers(req.headers);
+    headers.set("x-leitstand-path", req.nextUrl.pathname);
+    return NextResponse.next({ request: { headers } });
+  };
   const password = process.env.MC_DASHBOARD_PASSWORD;
   const { pathname } = req.nextUrl;
   const isPublic = PUBLIC_PATHS.some((r) => r.test(pathname));
@@ -62,14 +67,14 @@ export async function middleware(req: NextRequest) {
           })
         : new NextResponse(message, { status: 503, headers: { "content-type": "text/plain" } });
     }
-    return NextResponse.next();
+    return next();
   }
 
-  if (isPublic) return NextResponse.next();
+  if (isPublic) return next();
 
   const cookie = req.cookies.get("mc_auth")?.value;
   if (cookie && validRequestOrigin(req) && (await verifyAuthCookie(cookie, password))) {
-    return NextResponse.next();
+    return next();
   }
 
   const bearer = req.headers.get("authorization");
@@ -78,7 +83,7 @@ export async function middleware(req: NextRequest) {
     bearer?.startsWith("Bearer ") &&
     (await secretsMatch(bearer.slice(7), process.env.MC_TOKEN))
   ) {
-    return NextResponse.next();
+    return next();
   }
 
   // An agent credential (`akc_…`) is checked in the Node route. Middleware
@@ -86,7 +91,7 @@ export async function middleware(req: NextRequest) {
   // Pages still require the dashboard session.
   const agentToken = bearer?.match(/^Bearer\s+(akc_\S+)/i)?.[1];
   if (agentToken && pathname.startsWith("/api/")) {
-    return NextResponse.next();
+    return next();
   }
 
   if (pathname.startsWith("/api/")) {
@@ -96,6 +101,7 @@ export async function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
   url.pathname = "/login";
   url.search = "";
+  url.searchParams.set("next", pathname);
   return NextResponse.redirect(url);
 }
 

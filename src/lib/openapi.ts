@@ -1304,11 +1304,11 @@ export function openApiDocument(): Json {
         post: operation({
           operationId: "login",
           tags: ["auth"],
-          summary: "Exchange the dashboard password for an mc_auth cookie.",
+          summary: "Exchange the password and enrolled second factor for an eight-hour session.",
           security: [],
           requestBody: body({
             type: "object",
-            properties: { password: { type: "string" } },
+            properties: { password: { type: "string" }, code: { type: "string", description: "Authenticator or single-use recovery code when enrolled." } },
           }),
           responses: {
             "200": jsonResponse("Password accepted. Sets the mc_auth cookie.", {
@@ -1317,8 +1317,36 @@ export function openApiDocument(): Json {
               properties: { ok: { type: "boolean" } },
             }),
             "400": jsonResponse("The body is not JSON. error stays invalid request.", ref("Error")),
-            "401": jsonResponse("Wrong password.", ref("Error")),
+            "401": jsonResponse("Wrong password or second factor.", ref("Error")),
             "429": jsonResponse("More than 5 attempts in 10 minutes from one client IP.", ref("Error")),
+            "503": jsonResponse("Security configuration or storage is unavailable.", ref("Error")),
+          },
+        }),
+      },
+      "/api/security/mfa": {
+        get: operation({
+          operationId: "getDashboardMfa",
+          tags: ["auth"],
+          summary: "Read dashboard two-step sign-in status. Requires an operator session.",
+          security: sessionOnly,
+          responses: { "200": jsonResponse("Enrollment status and remaining recovery code count; never the secret.", { type: "object" }), ...flatErrors },
+        }),
+        post: operation({
+          operationId: "enrollDashboardMfa",
+          tags: ["auth"],
+          summary: "Start or confirm authenticator enrollment with password reauthentication.",
+          security: sessionOnly,
+          requestBody: body({ type: "object", required: ["action", "password"], properties: {
+            action: { type: "string", enum: ["start", "confirm"] }, password: { type: "string" },
+            enrollmentId: { type: "string" }, code: { type: "string" },
+          } }),
+          responses: {
+            "200": jsonResponse("Start returns a private QR code and key. Confirm returns ten single-use recovery codes once and rotates the session.", { type: "object" }),
+            "400": jsonResponse("Invalid setup request.", ref("Error")),
+            "401": jsonResponse("Session, password, or verification code was rejected.", ref("Error")),
+            "409": jsonResponse("Already enrolled.", ref("Error")),
+            "429": jsonResponse("Shared sign-in attempt limit exceeded.", ref("Error")),
+            "503": jsonResponse("Security storage or configuration is unavailable.", ref("Error")),
           },
         }),
       },

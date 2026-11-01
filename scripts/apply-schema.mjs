@@ -44,6 +44,7 @@ async function main() {
   try {
     client = await connectWithRetry();
     await client.query(sqlText);
+    await client.query(fs.readFileSync(path.resolve(__dirname, '..', 'supabase', 'dashboard-security.sql'), 'utf8'));
     console.log('migrate: schema applied');
   } catch (err) {
     // Message only: never print the connection string.

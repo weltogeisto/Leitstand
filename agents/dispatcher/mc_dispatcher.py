@@ -74,6 +74,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 import ak_pointers
@@ -355,12 +356,29 @@ def run_cli(platform: str, prompt: str, cwd: Path, review: bool = False) -> tupl
     if configured_cli:
         cmd[0] = configured_cli
 
+    # A trusted local broker can place the CLI in a separate OS worker. Its stop
+    # command must also verify cleanup across the Windows/WSL process boundary.
+    runner = os.environ.get("MC_WORKER_RUNNER")
+    job = uuid.uuid4().hex if runner else None
+    if runner:
+        cmd = [sys.executable, runner, "run", job, platform, *cmd[1:]]
+
     try:
         returncode, stdout, stderr = run_contained(cmd, cwd, TASK_TIMEOUT)
     except subprocess.TimeoutExpired:
         return False, f"timed out after {TASK_TIMEOUT}s", None
     except FileNotFoundError:
         return False, f"{cmd[0]} not found on PATH", None
+    finally:
+        if runner:
+            try:
+                stopped = subprocess.run([sys.executable, runner, "stop", job],
+                                         stdin=subprocess.DEVNULL, capture_output=True,
+                                         timeout=20, env=worker_environment())
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise ContainmentError("isolated worker cleanup could not be verified") from exc
+            if stopped.returncode:
+                raise ContainmentError("isolated worker cleanup failed")
 
     out = stdout + ("\n" + stderr if returncode != 0 and stderr else "")
     cost = None

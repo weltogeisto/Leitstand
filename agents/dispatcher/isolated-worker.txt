@@ -1,0 +1,31 @@
+Leitstand PC isolated worker (local deployment)
+
+The Windows dispatcher uses MC_WORKER_RUNNER to invoke worker_broker.py.
+The broker starts /opt/leitstand-worker/wsl_worker.py in Ubuntu-24.04.
+The supervisor, installed root-owned mode 700, runs each CLI as the dedicated
+leitstand-worker account inside a bubblewrap filesystem and PID namespace.
+Install bubblewrap, socat, git, CA certificates, Node 22, and the two CLIs first.
+The trusted supervisor needs /var/lib/leitstand-worker and its jobs directory
+mode 711 for mount-source traversal. Job homes are private, fresh, and removed
+after verified process cleanup. Do not use a reusable worker home for privileged
+credential writes: a worker could leave symlinks targeting host files.
+
+This deployment permits worktrees under C:/AI/leitstand-worktrees with Git
+common directories under C:/AI/projects. Change both broker and supervisor
+path checks together if relocating. Git metadata is mounted read-only;
+workers edit files, while an operator reviews, stages, and commits changes.
+Provider credentials travel over stdin and only the selected provider is
+copied. Dashboard, database, GitHub, and dispatcher credentials are excluded.
+Status reporting runs in the trusted Windows broker with a separate scoped
+credential and sends generic session metadata only.
+
+The namespace has outbound network access. The selected CLI necessarily has
+its provider credential and can read the current worktree. This protects the
+operator filesystem and control plane; it is not an air gap or a guarantee
+against kernel vulnerabilities. Native interactive CLI sessions outside the
+dispatcher retain their own permissions and settings.
+
+The broker stop command and dispatcher cleanup are both required. Test a
+started detached child, timeout cleanup, normal-exit cleanup, Windows executable
+interop denial, host-drive denial, and real CLI execution before enabling a
+different WSL distribution or changing these mounts.
