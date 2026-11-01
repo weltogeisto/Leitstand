@@ -51,8 +51,9 @@ test("follow-up keeps project and server-side ancestry, and blocks a running par
   assert.deepEqual(JSON.parse(envelope), { leitstand_work: 1, message: input.message, parent_id: 1, thread_id: 1 });
 });
 test("saved conversation is available after reload, without unrelated project history", async () => {
-  rows.set(1, task(1));
-  rows.set(2, task(2, { description: JSON.stringify({ leitstand_work: 1, message: "Continue", parent_id: 1, thread_id: 1 }) }));
+  // PostgreSQL bigint ids arrive as strings. Conversation links must remain numbers.
+  rows.set(1, task(1, { id: "1" as unknown as number }));
+  rows.set(2, task(2, { id: "2" as unknown as number, description: JSON.stringify({ leitstand_work: 1, message: "Continue", parent_id: 1, thread_id: 1 }) }));
   const response = await GET(new Request("https://work.test/api/work?task=2", { headers: { Authorization: "Bearer work-test-token" } }));
   const data = await response.json();
   assert.deepEqual(data.tasks.map((t: Task) => t.id), [1, 2]);

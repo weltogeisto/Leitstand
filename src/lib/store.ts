@@ -615,6 +615,9 @@ function asTask(row: Record<string, unknown>): Task {
   const receipt = receiptFromParts(row.receipt_id, row.receipt_kind, row.receipt_at);
   const task: Task = {
     ...(row as unknown as Task),
+    // node-postgres returns bigint as text; the task API and conversation links
+    // use numeric ids, including after an idempotent JSON replay.
+    id: Number(row.id),
     actor_type: row.actor_type === "human" || row.actor_type === "agent" ? row.actor_type : null,
     actor_id: row.actor_id == null || row.actor_id === "" ? null : String(row.actor_id),
   };
@@ -1633,7 +1636,7 @@ export async function getTask(id: number): Promise<Task | null> {
   const db = sql();
   try {
     const rows = await db`select * from tasks where id = ${id} limit 1`;
-    return (rows[0] as Task | undefined) ?? null;
+    return rows[0] ? asTask(rows[0]) : null;
   } catch (e) {
     throw new Error(errMsg(e));
   }
