@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agent Kontrol dispatcher — the harness daemon.
+Agent Kontrol dispatcher â€” the harness daemon.
 
 Runs on any machine with agent CLIs installed. Polls Agent Kontrol for
 queued tasks routed to the platforms available on this machine, runs each
@@ -8,15 +8,15 @@ one headless, and reports status + result + cost back. This is what turns
 Agent Kontrol from a dashboard into a working agent harness:
 
   Tasks page / create_task (MCP)
-        │
-        ▼
-  POST /api/tasks/claim  ◄── this daemon (one per machine)
-        │
-        ├── claude-code → claude -p "<prompt>" --output-format json
-        ├── codex       → codex exec "<prompt>"
-        └── grok        → grok -p "<prompt>"
-        │
-        ▼
+        â”‚
+        â–¼
+  POST /api/tasks/claim  â—„â”€â”€ this daemon (one per machine)
+        â”‚
+        â”œâ”€â”€ claude-code â†’ claude -p "<prompt>" --output-format json
+        â”œâ”€â”€ codex       â†’ codex exec "<prompt>"
+        â””â”€â”€ grok        â†’ grok -p "<prompt>"
+        â”‚
+        â–¼
   optional cross-vendor review (reviewer_platform), then
   PATCH /api/tasks/<id>  status=done|failed, result, cost_usd
 
@@ -50,7 +50,7 @@ requiring judgment beyond that should be a Cowork/interactive task, not a
 dispatched one. Review tasks always run read-only.
 
 Run it:  nohup python3 mc_dispatcher.py >> ~/.mission-control/dispatcher.log 2>&1 &
-Or install the launchd plist — see agents/dispatcher/README.md. Stdlib only.
+Or install the launchd plist â€” see agents/dispatcher/README.md. Stdlib only.
 """
 # PEP 604 annotations (`dict | None`) are used below; this keeps the module
 # importable on Python 3.9, which is still the system python3 on macOS.
@@ -178,7 +178,7 @@ def build_prompt(task: dict, pointers: bool = False) -> str:
             "read it, but do not edit, stage, or commit it. The dispatcher removes it when you finish."
         )
     lines.append(
-        "Work autonomously — do not wait for human input. When done, print a summary block:\n"
+        "Work autonomously â€” do not wait for human input. When done, print a summary block:\n"
         "RESULT: <3-6 lines: what you did, what changed, anything left>"
     )
     return "\n\n".join(lines)
@@ -192,12 +192,12 @@ def build_review_prompt(task: dict, worker_output: str) -> str:
         f"Worker's report:\n{worker_output[-3000:]}\n\n"
         "Review the actual state of the working tree / recent changes in this project. "
         "Do NOT make changes. Verify the work is correct and complete. "
-        "End with exactly one line: VERDICT: APPROVE or VERDICT: REQUEST_CHANGES — <one-line reason>"
+        "End with exactly one line: VERDICT: APPROVE or VERDICT: REQUEST_CHANGES â€” <one-line reason>"
     )
 
 
-# The whole final line: VERDICT: APPROVE or VERDICT: REQUEST_CHANGES, optionally " — <reason>".
-VERDICT_RE = re.compile(r"VERDICT: (APPROVE|REQUEST_CHANGES)(?:\s+[—–-]\s+\S.*)?")
+# The whole final line: VERDICT: APPROVE or VERDICT: REQUEST_CHANGES, optionally " â€” <reason>".
+VERDICT_RE = re.compile(r"VERDICT: (APPROVE|REQUEST_CHANGES)(?:\s+[â€”â€“-]\s+\S.*)?")
 # A Markdown code fence: up to 3 spaces of indent, then 3+ backticks or tildes.
 FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 
@@ -478,6 +478,7 @@ class WorktreeLock:
 
     def __init__(self, git_dir: Path) -> None:
         self.path = git_dir / LOCK_NAME
+        self.quarantine_path = git_dir / "leitstand-worker-quarantine.txt"
         self.fd: int | None = None
 
     def acquire(self, worktree: Path) -> None:
@@ -494,6 +495,15 @@ class WorktreeLock:
                 f"another dispatched task is already running in {worktree}; one agent per worktree"
             ) from None
         self.fd = fd
+        if self.quarantine_path.exists():
+            self.release()
+            raise DispatchRefused(f"worker cleanup needs operator verification; inspect {self.quarantine_path} before dispatching again")
+
+    def quarantine(self) -> None:
+        self.quarantine_path.write_text(
+            "Worker cleanup could not be verified. Stop any remaining worker processes, "
+            "check the worktree and private job folders, then remove this file to resume dispatch.\n"
+        )
 
     def release(self) -> None:
         if self.fd is not None:
@@ -645,6 +655,8 @@ def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
             body["cost_usd"] = round(float(cost), 4)
         api(f"/api/tasks/{tid}", body, "PATCH")
     except Exception as e:
+        if isinstance(e, ContainmentError) and lock is not None:
+            lock.quarantine()
         try:
             api(f"/api/tasks/{tid}", {
                 "status": "failed", "result": f"dispatcher error: {e}", "agent_id": agent_id,

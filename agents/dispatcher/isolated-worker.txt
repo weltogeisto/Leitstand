@@ -29,3 +29,8 @@ The broker stop command and dispatcher cleanup are both required. Test a
 started detached child, timeout cleanup, normal-exit cleanup, Windows executable
 interop denial, host-drive denial, and real CLI execution before enabling a
 different WSL distribution or changing these mounts.
+
+If cleanup cannot be verified, the dispatcher quarantines that worktree using
+leitstand-worker-quarantine.txt in its private Git metadata directory. Later jobs
+are refused even after a restart. An operator must verify that workers stopped
+and private job files were removed before deleting that marker and resuming.

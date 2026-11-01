@@ -32,6 +32,12 @@ def stop_job(job):
                     if start_time(data['pid']) == data['start']:
                         raise RuntimeError('Worker process did not terminate')
             record.unlink(missing_ok=True)
+        # Windows may terminate the WSL bridge before the supervisor's finally
+        # block runs. The explicit stop path also removes the private credentials.
+        private = ROOT / (job + '.private')
+        if private.exists():
+            if not shutil.rmtree.avoids_symlink_attacks: raise RuntimeError('Safe cleanup unavailable')
+            shutil.rmtree(private)
 
 def checked_path(value, parent):
     path = pathlib.Path(value).resolve()
@@ -135,12 +141,9 @@ def main():
                 stop_job(job); proc.wait(timeout=5); return 124
         return proc.returncode
     finally:
-        if proc is not None:
+        if created or proc is not None:
             stop_job(job)
-            if proc.poll() is None: proc.wait(timeout=5)
-        if created:
-            if not shutil.rmtree.avoids_symlink_attacks: raise RuntimeError('Safe cleanup unavailable')
-            shutil.rmtree(private)
+        if proc is not None and proc.poll() is None: proc.wait(timeout=5)
 
 if __name__ == '__main__':
     raise SystemExit(main())

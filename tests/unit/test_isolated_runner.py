@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -11,6 +12,19 @@ import mc_dispatcher as dispatcher
 
 
 class IsolatedRunnerTests(unittest.TestCase):
+    def test_uncertain_cleanup_blocks_later_jobs_until_operator_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            first = dispatcher.WorktreeLock(path)
+            first.acquire(path)
+            first.quarantine()
+            first.release()
+            second = dispatcher.WorktreeLock(path)
+            with self.assertRaises(dispatcher.DispatchRefused): second.acquire(path)
+            first.quarantine_path.unlink()
+            second.acquire(path)
+            second.release()
+
     def test_timeout_still_stops_isolated_worker(self):
         with mock.patch.dict(os.environ, {"MC_WORKER_RUNNER": "trusted-broker.py"}), \
              mock.patch.object(dispatcher, "run_contained", side_effect=subprocess.TimeoutExpired("worker", 1)), \
