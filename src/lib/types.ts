@@ -95,6 +95,8 @@ export interface Task {
 }
 
 export interface FleetAgent extends Agent {
+  /** Retired reporter: retain History data while omitting its dashboard card. */
+  dashboard_hidden?: boolean;
   current_session: Session | null;
   recent_sessions: Session[];
   derived_status: AgentStatus;

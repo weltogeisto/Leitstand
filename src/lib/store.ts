@@ -290,7 +290,7 @@ export async function fleet(): Promise<{ agents: FleetAgent[]; events: Event[] }
 
   // Retired reporters remain available in History without duplicating fleet cards.
   const hidden = new Set((process.env.MC_HIDDEN_AGENTS ?? "").split(",").map(id => id.trim()).filter(Boolean));
-  return { agents: agents.filter(a => !hidden.has(a.id)), events: events.filter(e => !hidden.has(e.agent_id)) };
+  return { agents: agents.map(a => hidden.has(a.id) ? { ...a, dashboard_hidden: true } : a), events };
 }
 
 export async function remember(input: {
