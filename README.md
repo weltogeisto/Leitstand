@@ -1,13 +1,20 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="public/logo/agent-kontrol-wordmark-byaie-white.svg">
-    <img src="public/logo/agent-kontrol-wordmark-byaie-navy.svg" alt="Agent Kontrol by the AIE" width="520">
-  </picture>
-</p>
+# Leitstand
 
-# Agent Kontrol
+Your agents, tasks, and repositories in one place. This fork adds a light strip-board dashboard, public GitHub project metadata, private status reporters, and a Windows task dispatcher.
 
-*Agent Kontrol™ by [The AIE Network™](https://theaie.net)*
+Production: **https://leitstand-hazel.vercel.app**
+
+The dashboard uses live fleet and task data. Installed reporters omit prompt text; trace-content capture and inbox polling are disabled. Each reporter has its own status-only credential. The dispatcher uses a separate task credential and isolated linked worktrees. The application connects to Postgres with a restricted runtime role and a verified TLS certificate.
+
+On this PC, the application checkout is `C:/AI/projects/leitstand`; private credentials, installed reporters, and logs are under `%USERPROFILE%/.leitstand`. Windows scheduled tasks `Leitstand-codex` and `Leitstand-dispatcher` start at login. On Gondolin, `leitstand-status.service` reports the `default` and `second` Hermes profiles. Two further Hermes installations have not yet been identified; Claude Code still requires account authentication. Do not treat their setup as complete.
+
+For Windows dispatch, create a linked Git worktree under `C:/AI/leitstand-worktrees/<project>` and use that folder name as the task's project. The dispatcher serves Codex, runs one task at a time, and contains each process tree in a Windows Job Object. Enable other platforms only after verifying their CLI authentication and an end-to-end task.
+
+Production schema changes are applied by an administrator before deployment. `MC_SKIP_MIGRATE=1` prevents the restricted application role from attempting DDL. `MC_DB_CA_CERT` supplies the database CA. Never commit runtime credentials or use the schema-owner password in deployments.
+
+Based on [Agent Kontrol by The AIE Network](https://github.com/mrhinkle/agent-kontrol), licensed under Apache-2.0. Upstream attribution and license notices are preserved. The remaining documentation below describes the upstream feature set; upstream names and examples may differ from this deployment.
+
+## Upstream documentation
 
 One dashboard for the AI coding agents you run: Claude Code, Codex, Grok, Hermes and anything that speaks MCP. See what each is doing, queue work for them, and check whether the backlog is actually shrinking.
 
