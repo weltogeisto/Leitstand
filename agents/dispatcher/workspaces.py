@@ -67,6 +67,8 @@ def prepare(project: str, workdir: Path, registry_file: str, repositories_dir: s
             checked_git(root, "clone", "--depth", "1", "--single-branch", "--no-recurse-submodules", "--", expected + ".git", str(repository))
         head = safe_git(repository, "rev-parse", "--verify", "HEAD")
         if head.returncode:
+            if checked_git(repository, "diff", "--cached", "--name-only"):
+                raise ValueError("This empty repository has staged work. Create its first commit before preparing a workspace.")
             # Git worktrees need a commit. An empty remote gets a local, empty base;
             # it is not pushed and no user work is staged.
             checked_git(repository, "-c", "user.name=Leitstand", "-c", "user.email=leitstand@localhost", "commit", "--allow-empty", "-m", "Initialize local workspace")

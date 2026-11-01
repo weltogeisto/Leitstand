@@ -20,6 +20,23 @@ def turn(tid, message, parent=None, **extra):
 
 
 class WorkConsoleTests(unittest.TestCase):
+    def test_empty_repository_never_commits_existing_staged_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repos, work = root / "repos", root / "work"
+            repos.mkdir(); work.mkdir()
+            repo = repos / "leitstand"; repo.mkdir()
+            workspaces.checked_git(repo, "init", "-q")
+            workspaces.checked_git(repo, "remote", "add", "origin", "https://github.com/weltogeisto/Leitstand.git")
+            (repo / "keep.txt").write_text("uncommitted work")
+            workspaces.checked_git(repo, "add", "keep.txt")
+            registry = root / "registry.json"
+            registry.write_text(json.dumps([{"id": "leitstand", "repository": "weltogeisto/Leitstand"}]))
+            with self.assertRaisesRegex(ValueError, "staged work"):
+                workspaces.prepare("leitstand", work, str(registry), str(repos))
+            self.assertNotEqual(workspaces.safe_git(repo, "rev-parse", "--verify", "HEAD").returncode, 0)
+            self.assertEqual(workspaces.checked_git(repo, "diff", "--cached", "--name-only"), "keep.txt")
+
     def test_followup_passes_real_prior_reply_and_current_message(self):
         prior = turn(1, "Review this", result="Try option B", status="done")
         with mock.patch.object(dispatcher, "api", return_value={"task": prior}):
