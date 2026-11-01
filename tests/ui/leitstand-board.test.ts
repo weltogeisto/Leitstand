@@ -24,3 +24,12 @@ test("idle and failed topic cards retain their latest status summary",()=>{
   assert.equal(buildStrips([a],[])[0].title,"Status metadata unavailable");
   assert.equal(buildStrips([a],[])[0].bay,"stuck");
 });
+test("retired reporters stay in History data without duplicate dashboard cards",()=>{
+  const old={id:"old",platform:"hermes",derived_status:"offline",current_session:null,dashboard_hidden:true} as FleetAgent;
+  const topic={id:"topic",platform:"hermes",derived_status:"done",current_session:null} as FleetAgent;
+  const agents=[old,topic];
+  assert.deepEqual(buildStrips(agents,[]).map(s=>s.id),["agent:topic"]);
+  assert.equal(agents.length,2);
+  const task={id:1,platform:"hermes",status:"running",assigned_agent:"old"} as Task;
+  assert.ok(buildStrips(agents,[task]).some(s=>s.id==="task:1"));
+});
