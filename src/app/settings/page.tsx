@@ -2,14 +2,14 @@ import { CredentialSettings } from "@/components/CredentialSettings";
 import { OwnerSettings } from "@/components/OwnerSettings";
 import { RepoSettings } from "@/components/RepoSettings";
 
-export const metadata = { title: "Settings · Agent Kontrol" };
+export const metadata = { title: "Settings · Leitstand" };
 
 export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="mt-1 text-sm text-gray-400">Configure what Agent Kontrol watches, and the credentials agents use.</p>
+        <p className="mt-1 text-sm text-gray-400">Configure what Leitstand watches, and the credentials agents use.</p>
       </div>
       <section className="space-y-3">
         <div>
