@@ -10,7 +10,8 @@ export function sourceFor(platform: string): Source {
   return "jobs";
 }
 export function buildStrips(agents: FleetAgent[], tasks: Task[]): Strip[] {
-  const strips: Strip[] = agents.map(a => {
+  const visibleAgents = agents.filter(a => !a.dashboard_hidden);
+  const strips: Strip[] = visibleAgents.map(a => {
     const status = a.derived_status;
     const bay: Bay = status === "waiting" ? "needs" : status === "failed" || status === "offline" ? "stuck" : status === "active" ? "moving" : "quiet";
     const session = a.current_session ?? a.recent_sessions?.[0];
@@ -23,7 +24,7 @@ export function buildStrips(agents: FleetAgent[], tasks: Task[]): Strip[] {
   for (const t of tasks) {
     if (["done", "cancelled"].includes(t.status)) continue;
     // Assigned work is already represented by its reporting agent.
-    if (["running", "claimed"].includes(t.status) && agents.some(a => a.id === t.assigned_agent)) continue;
+    if (["running", "claimed"].includes(t.status) && visibleAgents.some(a => a.id === t.assigned_agent)) continue;
     strips.push({ id: `task:${t.id}`, source: sourceFor(t.platform),
       bay: t.status === "review" ? "needs" : t.status === "failed" ? "stuck" : ["running", "claimed"].includes(t.status) ? "moving" : "quiet",
       who: `Task #${t.id} · ${t.platform}`, title: t.title,
