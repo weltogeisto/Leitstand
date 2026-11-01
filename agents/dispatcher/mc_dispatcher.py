@@ -325,7 +325,7 @@ def run_cli(platform: str, prompt: str, cwd: Path, review: bool = False) -> tupl
         )
     elif platform == "codex":
         cmd = ["codex", "exec"]
-        cmd += ["-s", "read-only"] if review else (extra or ["--full-auto"])
+        cmd += ["-s", "read-only"] if review else (extra or ["-s", "workspace-write", "-c", 'approval_policy="never"'])
         cmd += [prompt]
     elif platform == "grok":
         cmd = ["grok", "-p", prompt] + ([] if review else extra)
