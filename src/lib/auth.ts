@@ -1,4 +1,4 @@
-import { authCookieValue, secretsMatch } from "./authcrypto";
+import { verifyAuthCookie, validRequestOrigin, secretsMatch } from "./authcrypto";
 import { errorBody } from "@/lib/api-error";
 import { resolveAgentCredential } from "./credentials";
 import { chargeCredentialRequest, rateLimitedBody } from "./credential-rate-limit";
@@ -175,7 +175,7 @@ export async function resolveApiAccess(req: Request): Promise<Access> {
   if (password) {
     if (bearerFrom(req)?.startsWith("akc_")) return decideBearer(req, "strict", false);
     const cookie = readCookie(req, "mc_auth");
-    if (cookie && (await secretsMatch(cookie, await authCookieValue(password)))) {
+    if (cookie && validRequestOrigin(req) && (await verifyAuthCookie(cookie, password))) {
       return { ok: true, principal: { kind: "session" } };
     }
     return decideBearer(req, "strict", false);
@@ -246,6 +246,6 @@ export async function requireDashboardSession(req: Request): Promise<Response | 
     return null;
   }
   const cookie = readCookie(req, "mc_auth");
-  if (cookie && (await secretsMatch(cookie, await authCookieValue(password)))) return null;
+  if (cookie && validRequestOrigin(req) && (await verifyAuthCookie(cookie, password))) return null;
   return jsonDenied(UNAUTHORIZED);
 }

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { apiError } from "@/lib/api-error";
-import { authCookieValue, secretsMatch } from "@/lib/authcrypto";
+import { authCookieValue, DASHBOARD_SESSION_SECONDS, validRequestOrigin, secretsMatch } from "@/lib/authcrypto";
 import { clientIp } from "@/lib/rate-limit";
 import { loginLimiter } from "@/lib/login-limiter";
 
 export async function POST(req: Request) {
+  if (!validRequestOrigin(req)) return apiError("unauthorized");
   const password = process.env.MC_DASHBOARD_PASSWORD;
   if (!password) {
     return NextResponse.json({ ok: true, note: "no password configured" });
@@ -44,7 +45,7 @@ export async function POST(req: Request) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30, // 30 days
+    maxAge: DASHBOARD_SESSION_SECONDS,
   });
   return res;
 }

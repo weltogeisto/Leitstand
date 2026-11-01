@@ -34,7 +34,7 @@ def checked(ok):
     if not ok:
         raise ctypes.WinError(ctypes.get_last_error())
 
-def run(cmd, cwd, timeout):
+def run(cmd, cwd, timeout, *, env):
     job = kernel.CreateJobObjectW(None, None)
     checked(job)
     proc = None
@@ -45,7 +45,7 @@ def run(cmd, cwd, timeout):
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
             proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--child"],
                 cwd=str(cwd), stdin=subprocess.PIPE, stdout=out, stderr=err,
-                creationflags=subprocess.CREATE_NO_WINDOW)
+                creationflags=subprocess.CREATE_NO_WINDOW, env=env)
             checked(kernel.AssignProcessToJobObject(job, w.HANDLE(int(proc._handle))))
             # This is the gate: no user CLI exists until assignment has succeeded.
             proc.stdin.write(json.dumps(cmd).encode("utf-8"))

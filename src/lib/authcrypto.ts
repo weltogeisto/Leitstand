@@ -23,13 +23,10 @@ export async function secretsMatch(candidate: string, secret: string): Promise<b
   return diff === 0;
 }
 
-/**
- * Dashboard auth cookie: HMAC-SHA256 keyed by a server secret
- * (MC_COOKIE_SECRET, falling back to MC_TOKEN, falling back to the password
- * itself). A leaked cookie can't be reversed to the password without the
- * key; rotating any of those envs revokes all sessions.
- */
-export async function authCookieValue(password: string): Promise<string> {
+/** Absolute lifetime; checked by the server, not just the browser. */
+export const DASHBOARD_SESSION_SECONDS = 8 * 60 * 60;
+
+async function dashboardSignature(payload: string, password: string): Promise<string> {
   const keyMaterial =
     process.env.MC_COOKIE_SECRET || process.env.MC_TOKEN || `pw-only:${password}`;
   const key = await crypto.subtle.importKey(
@@ -39,10 +36,34 @@ export async function authCookieValue(password: string): Promise<string> {
     false,
     ["sign"]
   );
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(`mc-cookie-v1:${password}`));
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(`mc-cookie-v2:${payload}:${password}`));
+  return base64url(sig);
+}
+
+/** Unique signed session; rotating the password or cookie secret revokes all sessions. */
+export async function authCookieValue(password: string): Promise<string> {
+  const issued = Math.floor(Date.now() / 1000);
+  const payload = `v2.${issued}.${randomToken(16)}`;
+  return `${payload}.${await dashboardSignature(payload, password)}`;
+}
+
+/** Old perpetual cookies, malformed cookies, future issuance and expired sessions fail closed. */
+export async function verifyAuthCookie(cookie: string, password: string): Promise<boolean> {
+  const match = /^(v2\.(\d{10})\.[A-Za-z0-9_-]{22})\.([A-Za-z0-9_-]{43})$/.exec(cookie);
+  if (!match) return false;
+  const issued = Number(match[2]);
+  const now = Math.floor(Date.now() / 1000);
+  if (issued > now + 30 || now >= issued + DASHBOARD_SESSION_SECONDS) return false;
+  return secretsMatch(match[3], await dashboardSignature(match[1], password));
+}
+
+/** Cookie-authenticated mutations must come from this application's origin. */
+export function validRequestOrigin(req: Request): boolean {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return true;
+  if (req.headers.get("sec-fetch-site") === "cross-site") return false;
+  const origin = req.headers.get("origin");
+  if (!origin) return true; // non-browser API clients; browser mutations send Origin
+  try { return origin === new URL(req.url).origin; } catch { return false; }
 }
 
 // ─── OAuth / JWT / PKCE (Web Crypto only) ───────────────────────────────────

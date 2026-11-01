@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api-error";
-import { authCookieValue, secretsMatch } from "@/lib/authcrypto";
+import { verifyAuthCookie, validRequestOrigin, secretsMatch } from "@/lib/authcrypto";
 
 /**
  * Password gate for the dashboard.
@@ -68,7 +68,7 @@ export async function middleware(req: NextRequest) {
   if (isPublic) return NextResponse.next();
 
   const cookie = req.cookies.get("mc_auth")?.value;
-  if (cookie && (await secretsMatch(cookie, await authCookieValue(password)))) {
+  if (cookie && validRequestOrigin(req) && (await verifyAuthCookie(cookie, password))) {
     return NextResponse.next();
   }
 

@@ -1,4 +1,4 @@
-import { authCookieValue, randomToken, secretsMatch } from "@/lib/authcrypto";
+import { authCookieValue, verifyAuthCookie, DASHBOARD_SESSION_SECONDS, validRequestOrigin, randomToken, secretsMatch } from "@/lib/authcrypto";
 import { clientIp } from "@/lib/rate-limit";
 import { loginLimiter } from "@/lib/login-limiter";
 import { escapeHtml, isAllowedRedirectUri, resource as mcpResource } from "@/lib/oauth";
@@ -215,9 +215,10 @@ async function hasValidDashboardSession(req: Request): Promise<boolean> {
 
   const cookieHeader = req.headers.get("cookie") ?? "";
   const match = cookieHeader.match(/(?:^|;\s*)mc_auth=([^;]+)/);
-  const cookie = match?.[1] ? decodeURIComponent(match[1]) : "";
+  let cookie = "";
+  try { cookie = match?.[1] ? decodeURIComponent(match[1]) : ""; } catch { return false; }
   if (!cookie) return false;
-  return secretsMatch(cookie, await authCookieValue(password));
+  return validRequestOrigin(req) && verifyAuthCookie(cookie, password);
 }
 
 async function mintCodeAndRedirect(params: AuthParams, req: Request): Promise<Response> {
@@ -269,6 +270,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  if (!validRequestOrigin(req)) return errorPage("Cross-origin approval is not allowed", 403);
   let form: URLSearchParams;
   try {
     const text = await req.text();
@@ -333,7 +335,7 @@ export async function POST(req: Request) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   headers.append(
     "Set-Cookie",
-    `mc_auth=${cookieVal}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 30}${secure}`
+    `mc_auth=${cookieVal}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${DASHBOARD_SESSION_SECONDS}${secure}`
   );
   return new Response(res.body, { status: res.status, headers });
 }

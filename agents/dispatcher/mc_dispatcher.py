@@ -280,6 +280,25 @@ def stop_group(proc: subprocess.Popen, grace: float) -> bool:
     return False
 
 
+def worker_environment() -> dict[str, str]:
+    """Do not give task processes the dispatcher's API or infrastructure secrets.
+
+    This is an environment boundary, not filesystem isolation. CLI sign-in is
+    discovered through its normal user configuration; provider keys and other
+    arbitrary parent variables are deliberately not forwarded.
+    """
+    allowed = {
+        "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC",
+        "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+        "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+        "USER", "LOGNAME", "USERNAME", "USERDOMAIN", "LANG", "LC_ALL", "LC_CTYPE",
+        "TZ", "TERM", "COLORTERM", "NO_COLOR", "PYTHONUTF8", "PYTHONIOENCODING",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS",
+        "CODEX_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_GIT_BASH_PATH",
+    }
+    return {key: value for key, value in os.environ.items() if key.upper() in allowed}
+
+
 def run_contained(cmd: list[str], cwd: Path, timeout: float) -> tuple[int, str, str]:
     """Run cmd in a new session and stop its whole process group before returning.
 
@@ -289,11 +308,11 @@ def run_contained(cmd: list[str], cwd: Path, timeout: float) -> tuple[int, str, 
     """
     if os.name == "nt":
         from windows_job import run
-        return run(cmd, cwd, timeout)
+        return run(cmd, cwd, timeout, env=worker_environment())
     with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
         proc = subprocess.Popen(
             cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out_f, stderr=err_f,
-            start_new_session=True,
+            start_new_session=True, env=worker_environment(),
         )
         timed_out = False
         try:
