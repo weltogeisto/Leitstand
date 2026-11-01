@@ -20,6 +20,17 @@ def turn(tid, message, parent=None, **extra):
 
 
 class WorkConsoleTests(unittest.TestCase):
+    def test_verified_stop_closes_its_session_without_a_false_failure_alarm(self):
+        dispatcher.CURRENT_RUN.worker_job = ("a" * 32, "codex")
+        try:
+            with mock.patch.object(dispatcher, "api", return_value={}) as api:
+                dispatcher.acknowledge_stop(9, "codex-pc", "leitstand")
+            self.assertEqual(api.call_args_list[0].args[1]["status"], "cancelled")
+            self.assertEqual(api.call_args_list[1].args[1]["session_id"], "isolated-" + "a" * 32)
+            self.assertEqual(api.call_args_list[1].args[1]["status"], "done")
+        finally:
+            dispatcher.CURRENT_RUN.worker_job = None
+
     def test_empty_repository_never_commits_existing_staged_work(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

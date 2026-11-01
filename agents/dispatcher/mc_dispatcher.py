@@ -411,6 +411,7 @@ def run_cli(platform: str, prompt: str, cwd: Path, review: bool = False) -> tupl
     # command must also verify cleanup across the Windows/WSL process boundary.
     runner = os.environ.get("MC_WORKER_RUNNER")
     job = uuid.uuid4().hex if runner else None
+    CURRENT_RUN.worker_job = (job, platform) if job else None
     if runner:
         cmd = [sys.executable, runner, "run", job, platform, *cmd[1:]]
 
@@ -620,6 +621,20 @@ def finish_task(tid: object, body: dict) -> None:
             "result": "[stopped] Work stopped. Changes already made remain in the project workspace."}, "PATCH")
 
 
+def acknowledge_stop(tid: int, agent_id: str, project: str | None) -> None:
+    api(f"/api/tasks/{tid}", {"status": "cancelled", "agent_id": agent_id,
+        "result": "[stopped] Work stopped. Changes already made remain in the project workspace. You can send a follow-up."}, "PATCH")
+    worker = getattr(CURRENT_RUN, "worker_job", None)
+    if worker:
+        job, platform = worker
+        # The broker reports interruption as failed until cleanup is verified.
+        # An intentional, verified stop should not leave a false fleet alarm.
+        api("/api/ingest", {"agent_id": f"{platform}-{HOSTNAME}", "platform": platform,
+            "machine": HOSTNAME, "project": project, "session_id": f"isolated-{job}",
+            "kind": "session_end", "status": "done", "title": "Work stopped by operator",
+            "detail": {"task_id": tid, "stopped": True}})
+
+
 class CancellationWatch:
     def __init__(self, tid: int):
         self.tid = tid
@@ -765,8 +780,7 @@ def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
             body["cost_usd"] = round(float(cost), 4)
         finish_task(tid, body)
     except RunCancelled:
-        api(f"/api/tasks/{tid}", {"status": "cancelled", "agent_id": agent_id,
-            "result": "[stopped] Work stopped. Changes already made remain in the project workspace. You can send a follow-up."}, "PATCH")
+        acknowledge_stop(tid, agent_id, task.get("project"))
     except Exception as e:
         if isinstance(e, ContainmentError) and lock is not None:
             lock.quarantine()
