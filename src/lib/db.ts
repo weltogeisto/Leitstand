@@ -193,6 +193,7 @@ function getPgPool(): Pool {
   const created = new Pool({
     connectionString: process.env.DATABASE_URL,
     max,
+    ...(process.env.MC_DB_CA_CERT ? { ssl: { ca: process.env.MC_DB_CA_CERT, rejectUnauthorized: true } } : {}),
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
   });
