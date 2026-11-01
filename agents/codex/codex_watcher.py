@@ -70,6 +70,7 @@ def main() -> None:
     seen: dict[str, float] = {}   # session key -> last mtime
     active: set[str] = set()
     first_scan = True
+    last_heartbeat = 0.0
 
     while True:
         now = time.time()
@@ -103,6 +104,12 @@ def main() -> None:
                     active.add(sid)
                 report(sid, "heartbeat", "Codex session active")
         first_scan = False
+
+        if now - last_heartbeat >= 60:
+            post({"agent_id": AGENT_ID, "platform": "codex", "machine": HOSTNAME,
+                  "display_name": os.environ.get("MC_AGENT_NAME", f"Codex ({HOSTNAME})"),
+                  "kind": "heartbeat", "title": "Session watcher online"})
+            last_heartbeat = now
 
         # idle sessions -> done
         for sid in list(active):
