@@ -1322,6 +1322,19 @@ export function openApiDocument(): Json {
           },
         }),
       },
+      "/api/projects": {
+        get: operation({
+          operationId: "getProjects",
+          tags: ["fleet"],
+          summary: "Public GitHub repositories for the Leitstand project board.",
+          security: cookieOrBearer,
+          responses: {
+            "200": jsonResponse("Repository metadata cached for fifteen minutes.", { type: "object" }),
+            ...flatErrors,
+            "503": jsonResponse("Repository data is temporarily unavailable.", ref("Error")),
+          },
+        }),
+      },
       "/api/fleet": {
         get: operation({
           operationId: "getFleet",

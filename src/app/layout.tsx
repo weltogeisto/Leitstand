@@ -1,47 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { AgentKontrolMark } from "@/components/AgentKontrolMark";
-import { SiteNav } from "@/components/SiteNav";
-import { AttentionStrip } from "@/components/AttentionStrip";
+import DashboardShell from "@/components/DashboardShell";
 import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "Agent Kontrol",
-  description: "One control room for every AI coding agent you run: status, history, tasks, and a net-backlog progress board.",
-};
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const name = process.env.NEXT_PUBLIC_MC_NAME ?? "Agent Kontrol";
-  // The byline and trademark notice belong to the default product name only.
-  const branded = process.env.NEXT_PUBLIC_MC_NAME === undefined;
-  return (
-    <html lang="en">
-      <body className="min-h-screen">
-        <header className="border-b border-white/10 sticky top-0 z-10 backdrop-blur bg-[#0a0f1c]/80">
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-2">
-            <Link href="/" className="group flex shrink-0 items-center gap-2 py-1 md:py-0">
-              <AgentKontrolMark className="h-6 w-6 text-gray-200 transition-colors group-hover:text-white" />
-              <span className="font-semibold tracking-wide">{name}</span>
-              {branded && <span className="hidden text-xs text-gray-500 sm:inline">by The AIE</span>}
-            </Link>
-            {/* Two rows: wordmark and attention strip on top, nav below. The strip
-                shares the top row from sm up and takes its own row on a phone. */}
-            <div className="min-w-0 basis-full py-0.5 sm:ml-auto sm:basis-auto">
-              <AttentionStrip />
-            </div>
-            <SiteNav />
-          </div>
-        </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
-        <footer className="mx-auto max-w-6xl px-4 py-8 text-xs text-gray-600">
-          Agents push, nobody polls. Connect an agent via the MCP server at <span className="mono">/api/mcp</span> or POST to <span className="mono">/api/ingest</span>.
-          {branded && (
-            <p className="mt-2">
-              Agent Kontrol&trade; by <a className="underline" href="https://theaie.net">The AIE Network</a>&trade;. &copy; 2026 Mark Hinkle and The AIE Network. Agent Kontrol is a trademark of Mark Hinkle. The AIE Network is a trademark of Peripety Labs LLC.
-            </p>
-          )}
-        </footer>
-      </body>
-    </html>
-  );
-}
+export const metadata: Metadata = { title: "Leitstand", description: "Your agents and projects, in one place." };
+export default function RootLayout({children}:{children:React.ReactNode}) { return <html lang="en"><body><DashboardShell>{children}</DashboardShell></body></html>; }

@@ -3,7 +3,7 @@ import { HELP_DOCS } from "@/lib/help-docs";
 
 export const dynamic = "force-static";
 
-export const metadata = { title: "Help · Agent Kontrol" };
+export const metadata = { title: "Help · Leitstand" };
 
 export default function HelpIndex() {
   return (

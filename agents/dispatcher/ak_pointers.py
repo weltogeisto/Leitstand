@@ -234,7 +234,8 @@ def write_replacing(path: Path, expected: Snapshot, new_text: str | None, mode: 
             fh.write(data)
             fh.flush()
             if mode is not None:
-                os.fchmod(fh.fileno(), mode)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fh.fileno(), mode)
             os.fsync(fh.fileno())
         if expected.raw is None:
             if os.path.lexists(path):
