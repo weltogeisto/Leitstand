@@ -31,18 +31,21 @@ jobs:
       WATCH_STATE_PATH: .watch-state/state.json
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        # actions/checkout v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        # actions/setup-node v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "22"
 
       - name: Restore watch state
         if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && vars.WATCH_ENABLED == 'true' }}
-        uses: actions/cache/restore@v4
+        # actions/cache/restore v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .watch-state
           key: watch-state-v1-${{ github.run_id }}-${{ github.run_attempt }}
@@ -66,7 +69,8 @@ jobs:
       - name: Save watch state
         if: ${{ always() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && vars.WATCH_ENABLED == 'true' && hashFiles('.watch-state/state.json') != '' }}
         continue-on-error: true
-        uses: actions/cache/save@v4
+        # actions/cache/save v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .watch-state
           key: watch-state-v1-${{ github.run_id }}-${{ github.run_attempt }}

@@ -826,10 +826,11 @@ describe("watch workflow", () => {
     assert.equal(doc.jobs.watch["runs-on"], "ubuntu-latest");
     assert.deepEqual(doc.permissions, { contents: "read" });
     const steps = doc.jobs.watch.steps;
-    const setup = steps.find((step) => step.uses === "actions/setup-node@v7");
+    for (const step of steps) if (step.uses) assert.match(step.uses, /^actions\/[a-z/-]+@[a-f0-9]{40}$/);
+    const setup = steps.find((step) => step.uses?.startsWith("actions/setup-node@"));
     assert.equal(setup?.with?.["node-version"], "22");
-    const restore = steps.find((step) => step.uses === "actions/cache/restore@v4");
-    const save = steps.find((step) => step.uses === "actions/cache/save@v4");
+    const restore = steps.find((step) => step.uses?.startsWith("actions/cache/restore@"));
+    const save = steps.find((step) => step.uses?.startsWith("actions/cache/save@"));
     assert.equal(restore?.with?.key, "watch-state-v1-${{ github.run_id }}-${{ github.run_attempt }}");
     assert.equal(restore?.with?.["restore-keys"], "watch-state-v1-");
     assert.equal(save?.with?.key, "watch-state-v1-${{ github.run_id }}-${{ github.run_attempt }}");

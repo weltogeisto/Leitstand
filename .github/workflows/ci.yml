@@ -16,14 +16,17 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      # actions/checkout v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      # actions/setup-node v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-python@v7
+      # actions/setup-python v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.12"
       - run: npm ci
@@ -53,10 +56,12 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:mc@localhost:5432/mc
     steps:
-      - uses: actions/checkout@v7
+      # actions/checkout v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      # actions/setup-node v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
           cache: npm
@@ -71,7 +76,8 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      # actions/checkout v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Build image
