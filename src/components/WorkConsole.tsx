@@ -6,6 +6,8 @@ import { Markdown } from "./Markdown";
 import { WORK_MESSAGE_LIMIT, WORK_PLATFORMS, WORK_PROJECTS, workFinished, workMessage, workStatus, workThreadId, workTurn } from "@/lib/work";
 import { defaultWorkSettings, EFFORT_HELP, EFFORT_NAMES, resolveWorkSettings, WORK_MODELS, workSettingsLabel, type WorkSettings } from "@/lib/work-settings";
 import type { Task } from "@/lib/types";
+import { WorkIcon, WorkMark } from "./WorkIcon";
+import { WorkSidebar } from "./WorkSidebar";
 import "./work.css";
 
 function mergeTasks(previous: Task[], incoming: Task[]) {
@@ -44,6 +46,30 @@ export default function WorkConsole() {
   const [olderBusy, setOlderBusy] = useState(false);
   const attempt = useRef<{ body: string; key: string } | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const messages = useRef<HTMLDivElement>(null);
+  const historyDialog = useRef<HTMLDialogElement>(null);
+  const nearLatest = useRef(true);
+  const previousThread = useRef<number | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () => {
+      if (viewport && viewport.scale === 1) panel.current?.style.setProperty("--work-viewport", `${viewport.height}px`);
+    };
+    resize();
+    viewport?.addEventListener("resize", resize);
+    return () => viewport?.removeEventListener("resize", resize);
+  }, []);
+  useEffect(() => {
+    const el = input.current;
+    if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 160)}px`; }
+  }, [message]);
+  useEffect(() => {
+    if (historyOpen) historyDialog.current?.showModal();
+    else historyDialog.current?.close();
+  }, [historyOpen]);
 
   useEffect(() => {
     try {
@@ -104,7 +130,20 @@ export default function WorkConsole() {
   const chosenProject = last?.project || project;
   const projectName = WORK_PROJECTS.find(p => p.id === chosenProject)?.name || chosenProject;
   const recent = [...new Map([...all].reverse().map(t => [workThreadId(t), t])).values()].sort((a, b) => b.id - a.id);
+  const savedConversations = recent.map(task => {
+    const first = all.find(t => t.id === workThreadId(task)) ?? task;
+    // Keep our explicitly named verification conversations accessible without
+    // presenting setup prompts as the user's working history.
+    const setup = /^(?:Leitstand (?:setup|model-controls) verification|Cancellation verification only|Follow-up verification only|Verify (?:Claude Code|Codex)|Verify isolated PC worker$|Verify Windows dispatcher setup$|Isolated (?:worker|dispatch))/i.test(first.title);
+    return { task, title: first.title, setup };
+  });
   const lastId = last?.id;
+  const lastResult = last?.result;
+  useEffect(() => {
+    const el = messages.current;
+    if (el && (previousThread.current !== threadId || nearLatest.current)) el.scrollTop = el.scrollHeight;
+    previousThread.current = threadId;
+  }, [threadId, lastId, lastResult]);
   useEffect(() => {
     if (!last) return;
     const agent = WORK_PLATFORMS.some(p => p.id === last.platform) ? last.platform : "codex";
@@ -134,6 +173,8 @@ export default function WorkConsole() {
     if (busy) return;
     setSendError("");
     setMessage("");
+    historyDialog.current?.close();
+    setHistoryOpen(false);
     attempt.current = null;
     setPlatform(WORK_PLATFORMS.some(p => p.id === task.platform) ? task.platform : "codex");
     router.push(`/work?task=${task.id}`, { scroll: false });
@@ -141,15 +182,18 @@ export default function WorkConsole() {
 
   function newWork() {
     setMessage(""); setSendError(""); attempt.current = null; setConversation([]);
+    historyDialog.current?.close();
+    setHistoryOpen(false); nearLatest.current = true;
     router.push(`/work?project=${encodeURIComponent(chosenProject)}`, { scroll: false });
     input.current?.focus();
   }
   async function send(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || active || !message.trim()) return;
+    if (busy || active || !loaded || error || !message.trim() || (selectedId && !last)) return;
     const body = JSON.stringify({ message: message.trim(), project: chosenProject, platform, ...settings, parent_id: last?.id ?? null });
     if (attempt.current?.body !== body) attempt.current = { body, key: crypto.randomUUID() };
     setBusy(true); setSendError("");
+    nearLatest.current = true;
     try {
       const result = await request("/api/work", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.current.key }, body });
       if (!result.task) throw new Error("No saved run was returned. Please retry.");
@@ -182,46 +226,54 @@ export default function WorkConsole() {
     finally { setOlderBusy(false); }
   }
 
-  return <div className="work-console">
-    <div className="work-heading"><div><h1>Work with your agents</h1><p>Choose a project, give instructions, and keep the conversation here.</p></div><button type="button" className="work-secondary" onClick={newWork} disabled={busy}>+ New work</button></div>
-    {error && <p className="work-error" role="alert">{error} Saved conversations remain available when the connection returns.</p>}
-    <div className="work-layout">
-      <aside className="work-sidebar" aria-label="Saved work"><h2>Recent work</h2>
-        {!loaded ? <p>Loading…</p> : !recent.length ? <p>Your conversations will appear here.</p> : <div className="work-recent">{recent.map(t => <button type="button" key={workThreadId(t)} aria-current={workThreadId(t) === threadId ? "true" : undefined} onClick={() => choose(t)} disabled={busy}><strong>{t.title}</strong><span>{t.project} · {workStatus(t)}</span></button>)}</div>}
-        {cursor && <button type="button" className="work-link" onClick={olderWork} disabled={olderBusy}>{olderBusy ? "Loading…" : "Load older work"}</button>}
-        <p className="work-note">Codex and Claude Code run on your PC, which must be on and connected. Hermes currently reports status here; its conversations are still in Telegram.</p>
-      </aside>
-      <section className="work-main" aria-label="Conversation">
-        <div className="work-context"><span>{last ? projectName : "New conversation"}</span>{last && <span className={`work-status work-${last.status}`}>{workStatus(last)}</span>}</div>
-        <div className="work-messages">
-          {!last && <div className="work-welcome"><h2>What would you like to work on?</h2><p>Ask for a change, a review, a plan, or an answer about your project. The agent’s reply will appear here, even if you close this page.</p><p>Project files stay in a separate workspace on your PC. Follow-ups continue with those files; changes are not automatically published.</p><button type="button" className="work-secondary" onClick={() => { setMessage("Review this project and suggest the three most useful next improvements. Explain why, and wait for my choice before changing files."); input.current?.focus(); }}>Help me choose the next step</button></div>}
-          {selectedId && loaded && !selected && !error && <p>Opening saved conversation…</p>}
-          {earlier && <a className="work-link" href={`/work?task=${earlier}`}>View earlier conversation</a>}
+  const sidebar = <WorkSidebar recent={savedConversations} threadId={threadId} loaded={loaded} busy={busy} cursor={cursor} olderBusy={olderBusy} onChoose={choose} onNew={newWork} onOlder={olderWork}/>;
+  const sendLabel = busy ? "Sending…" : last ? "Send follow-up" : "Start work";
+  return <div className="work-console" ref={panel}>
+    <aside className="work-sidebar" aria-label="Saved work">{sidebar}</aside>
+    <dialog ref={historyDialog} className="work-history-dialog" aria-label="Conversations and navigation" onClose={() => setHistoryOpen(false)} onClick={e => { if (e.target === historyDialog.current) setHistoryOpen(false); }}>
+      {historyOpen && <div className="work-drawer"><WorkSidebar recent={savedConversations} threadId={threadId} loaded={loaded} busy={busy} cursor={cursor} olderBusy={olderBusy} onChoose={choose} onNew={newWork} onOlder={olderWork} onClose={() => setHistoryOpen(false)}/></div>}
+    </dialog>
+    <section className="work-main" aria-label="Conversation">
+      <header className="work-topbar">
+        <button type="button" className="work-icon-button work-menu-button" aria-label="Open conversations" onClick={() => setHistoryOpen(true)}><WorkIcon name="menu"/></button>
+        <div className="work-project-context"><span className="work-context-label">PROJECT</span><label className="work-project-picker"><WorkIcon name="folder"/><span className="sr-only">Project</span><select aria-label="Project" style={{ width: `${Math.min(24, Math.max(8, projectName.length + 1))}ch` }} value={chosenProject} onChange={e => setProject(e.target.value)} disabled={busy || !!last}>{WORK_PROJECTS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>{!last && <WorkIcon name="chevron"/>}</label></div>
+        <div className="work-topbar-actions">{last && <span className={`work-status work-${last.status}`}><i/>{workStatus(last)}</span>}<button type="button" className="work-icon-button" onClick={newWork} disabled={busy} aria-label="New conversation" title="New conversation"><WorkIcon name="plus"/></button></div>
+      </header>
+      {error && <p className="work-error" role="alert">{error}</p>}
+      <div className={`work-messages ${!last ? "work-messages-empty" : ""}`} ref={messages} onScroll={() => { const el = messages.current; if (el) nearLatest.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100; }}>
+        {!last && !selectedId && <div className="work-welcome"><div className="work-hero-mark"><WorkMark/></div><p className="work-eyebrow">LEITSTAND / WORKSPACE</p><h1>What are we<br/>working on?</h1><p className="work-welcome-caption">Your ideas. Your agents. A place to make progress.</p>
+          <div className="work-starters">
+            <button type="button" onClick={() => { setMessage("Explore this project and suggest the three most useful next improvements. Explain why, and wait for my choice before changing files."); input.current?.focus(); }}><WorkIcon name="code"/><span>Explore project<small>Find the next step</small></span><span className="work-starter-arrow">↗</span></button>
+            <button type="button" onClick={() => { setMessage("Help me plan a change to this project. First ask me what I want to achieve, then propose a clear plan before changing files."); input.current?.focus(); }}><WorkIcon name="plan"/><span>Make a plan<small>Think it through</small></span><span className="work-starter-arrow">↗</span></button>
+            <button type="button" onClick={() => { setMessage("Review this project's code for bugs and practical improvements. Give me the most important findings with file references. Do not change files yet."); input.current?.focus(); }}><WorkIcon name="review"/><span>Review code<small>Get a second look</small></span><span className="work-starter-arrow">↗</span></button>
+          </div>
+        </div>}
+        {selectedId && !selected && !error && <p className="work-opening" role="status">Opening conversation…</p>}
+        <div className="work-thread">
+          {earlier && <a className="work-text-button" href={`/work?task=${earlier}`}>View earlier conversation</a>}
           {turns.map(t => <article key={t.id} className="work-turn">
-            <div className="work-user"><small>You · #{t.id}</small><p>{workMessage(t)}</p></div>
-            <div className="work-reply"><small>{WORK_PLATFORMS.find(p => p.id === t.platform)?.name || t.platform} · {workStatus(t)}<span className="work-run-settings">{workSettingsLabel(t.platform, workTurn(t)?.settings)}</span></small>
-              {t.result ? <Markdown source={t.result.replace(/^\[stopped\]\s*/, "")} /> : <p className="work-note" role="status">{t.status === "queued" ? "Saved and queued. Your PC picks up work automatically, usually within 30 seconds when it is free. You can leave this page." : t.status === "claimed" ? "Preparing the project workspace…" : t.status === "cancelled" ? "Waiting for the worker to confirm it has stopped…" : "Working on your request. The reply will appear here when the run finishes."}</p>}
-              {t.result && <a className="work-link" href={`data:text/plain;charset=utf-8,${encodeURIComponent(`${workMessage(t)}\n\n${t.result}`)}`} download={`leitstand-${t.id}.txt`}>Download reply</a>}
+            <div className="work-user"><span>You</span><p>{workMessage(t)}</p></div>
+            <div className="work-reply"><div className="work-reply-heading"><span className={`work-agent-symbol work-agent-${t.platform}`}><WorkIcon name="code"/></span><span><strong>{WORK_PLATFORMS.find(p => p.id === t.platform)?.name || t.platform}</strong><span className="work-run-settings">{workSettingsLabel(t.platform, workTurn(t)?.settings)}</span></span><span className={`work-status work-${t.status}`}>{workStatus(t)}</span></div>
+              {t.result ? <Markdown source={t.result.replace(/^\[stopped\]\s*/, "")} /> : <p className="work-pending" role="status"><span className="work-thinking-dot"/>{t.status === "queued" ? "Queued. Your PC will pick this up when it is free." : t.status === "claimed" ? "Preparing your project…" : t.status === "cancelled" ? "Stopping the worker…" : "Working on it. Your reply will appear here."}</p>}
+              {t.result && <a className="work-download" href={`data:text/plain;charset=utf-8,${encodeURIComponent(`${workMessage(t)}\n\n${t.result}`)}`} download={`leitstand-${t.id}.txt`}><WorkIcon name="download"/>Save reply</a>}
             </div>
           </article>)}
         </div>
+      </div>
+      <div className="work-composer-dock">
         <form className="work-compose" onSubmit={send}>
-          <div className="work-selects">{!last && <label>Project<select aria-label="Project" value={project} onChange={e => setProject(e.target.value)} disabled={busy}>{WORK_PROJECTS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
-            <label>Agent<select aria-label="Agent" value={platform} onChange={e => changeAgent(e.target.value)} disabled={busy || !!active}>{WORK_PLATFORMS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-          </div>
-          <div className="work-model-selects">
-            <label>Model<select aria-label="Model" value={settings.model} onChange={e => changeModel(e.target.value)} disabled={busy || !!active}>{WORK_MODELS[platform].models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
-            <label>Reasoning effort<select aria-label="Reasoning effort" aria-describedby="work-effort-help" value={settings.effort} onChange={e => remember(platform, { ...settings, effort: e.target.value })} disabled={busy || !!active}>{selectedModel?.efforts.map(e => <option key={e} value={e}>{EFFORT_NAMES[e] ?? e}</option>)}</select></label>
-          </div>
-          <p className="work-settings-help" id="work-effort-help">{EFFORT_HELP[settings.effort]} {active ? "These settings are fixed for this run." : last ? "Changes apply to your next message." : "Your choices are remembered on this device."}{platform === "claude-code" && " Model access depends on your Claude plan."}</p>
-          <label htmlFor="work-message">{last ? "Follow-up instructions" : "Your instructions"}</label>
-          <textarea ref={input} id="work-message" value={message} maxLength={WORK_MESSAGE_LIMIT} rows={4} onChange={e => setMessage(e.target.value)} disabled={busy} placeholder={last ? "Ask a question or tell the agent what to do next…" : "Describe what you want done…"} />
+          <div className="work-composer-top"><label className="work-agent-picker"><span className={`work-agent-dot work-agent-${platform}`}/><select aria-label="Agent" value={platform} onChange={e => changeAgent(e.target.value)} disabled={busy || !!active}>{WORK_PLATFORMS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><WorkIcon name="chevron"/></label><span>{active ? "Draft your next message" : last ? "Continue the conversation" : "New conversation"}</span></div>
+          <label htmlFor="work-message" className="sr-only">{last ? "Follow-up instructions" : "Your instructions"}</label>
+          <textarea ref={input} id="work-message" value={message} maxLength={WORK_MESSAGE_LIMIT} rows={2} onChange={e => setMessage(e.target.value)} disabled={busy} placeholder={last ? "What’s the next step?" : "Give your agent something to work on…"} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}/>
           {sendError && <p role="alert" className="work-error">{sendError}</p>}
-          <div className="work-send"><span>{active ? "You can draft your follow-up while the agent works." : last ? "Continues with this conversation and the same project files." : "Your request and reply are saved in Leitstand."}</span>
-            {active ? <button type="button" className="work-secondary" disabled={busy || last.status === "cancelled"} onClick={stop}>{last.status === "cancelled" ? "Stopping…" : "Stop work"}</button> : <button type="submit" className="work-primary" disabled={busy || !loaded || !!error || !message.trim() || (!!selectedId && !last)}>{busy ? "Sending…" : last ? "Send follow-up" : "Start work"}</button>}
+          <div className="work-composer-controls">
+            <label className="work-control work-model-control"><span className="sr-only">Model</span><select aria-label="Model" title={selectedModel?.name} value={settings.model} onChange={e => changeModel(e.target.value)} disabled={busy || !!active}>{WORK_MODELS[platform].models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><WorkIcon name="chevron"/></label>
+            <label className="work-control work-effort-control"><span className="work-effort-bars" aria-hidden="true"><i/><i/><i/></span><select aria-label="Reasoning effort" title={`${EFFORT_NAMES[settings.effort]} effort. ${EFFORT_HELP[settings.effort]}`} value={settings.effort} onChange={e => remember(platform, { ...settings, effort: e.target.value })} disabled={busy || !!active}>{selectedModel?.efforts.map(e => <option key={e} value={e}>{EFFORT_NAMES[e] ?? e}</option>)}</select><WorkIcon name="chevron"/></label>
+            {active ? <button type="button" className="work-send-button work-stop-button" aria-label={last.status === "cancelled" ? "Stopping…" : "Stop work"} title="Stop work" disabled={busy || last.status === "cancelled"} onClick={stop}><WorkIcon name="stop"/></button> : <button type="submit" className="work-send-button" aria-label={sendLabel} title={`${sendLabel} (Ctrl + Enter)`} disabled={busy || !loaded || !!error || !message.trim() || (!!selectedId && !last)}><WorkIcon name="arrow"/></button>}
           </div>
         </form>
-      </section>
-    </div>
+        <div className="work-composer-footnote"><span><WorkIcon name="monitor"/>Runs on your PC</span><span>{active ? "You can leave. Work keeps going." : "Conversations are saved."}</span></div>
+      </div>
+    </section>
   </div>;
 }
