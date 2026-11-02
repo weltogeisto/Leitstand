@@ -1694,6 +1694,8 @@ export function openApiDocument(): Json {
             message: { type: "string", minLength: 1, maxLength: WORK_MESSAGE_LIMIT },
             project: { type: "string", enum: WORK_PROJECTS.map(p => p.id) },
             platform: { type: "string", enum: WORK_PLATFORMS.map(p => p.id) },
+            model: { type: "string", description: "Model ID from agents/dispatcher/work-models.json for the selected platform. Omit to retain the previous turn's model, or use the runner default for new work." },
+            effort: { type: "string", enum: ["low", "medium", "high", "xhigh", "max", "ultra"], description: "Must be supported by the selected model. Saved with the run and sent as an explicit CLI setting." },
             parent_id: { type: ["integer", "null"], minimum: 1 },
           } }),
           responses: { "200": jsonResponse("Saved and queued task.", { type: "object", properties: { ok: { type: "boolean" }, task: ref("Task") } }), ...flatErrors },

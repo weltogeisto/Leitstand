@@ -7,6 +7,7 @@ import { readIdempotencyHeader } from "@/lib/idempotency";
 import { createTask, getTask } from "@/lib/store";
 import { WorkInputError, workFinished, workInput, workThreadId, workTurn } from "@/lib/work";
 import type { Task } from "@/lib/types";
+import { resolveWorkSettings, WorkSettingsError } from "@/lib/work-settings";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -50,12 +51,16 @@ export async function POST(req: Request) {
     if (input.parentId && !parent) return apiError("task_not_found");
     if (parent && parent.project !== input.project) return apiError("validation_failed", { message: "A follow-up must use the same project. Start new work to change projects." });
     if (parent && !workFinished(parent)) return apiError("conflict", { message: "Wait for this run to finish or stop before sending a follow-up." });
+    const settings = resolveWorkSettings(input.platform, input, parent?.platform === input.platform ? workTurn(parent)?.settings : undefined);
     const task = await createTask({
       title: input.message.replace(/\s+/g, " ").slice(0, 140),
-      description: JSON.stringify({ leitstand_work: 1, message: input.message, parent_id: parent?.id ?? null, thread_id: parent ? workThreadId(parent) : null }),
+      description: JSON.stringify({ leitstand_work: 1, message: input.message, parent_id: parent?.id ?? null, thread_id: parent ? workThreadId(parent) : null, settings }),
       project: input.project, platform: input.platform, priority: 2, created_by: "leitstand-work",
       actor: actorFromPrincipal(access.principal), idempotency_key: readIdempotencyHeader(req),
     });
     return NextResponse.json({ ok: true, task });
-  } catch (e) { return publicError("[work] send failed", e); }
+  } catch (e) {
+    if (e instanceof WorkSettingsError) return apiError("validation_failed", { message: e.userMessage });
+    return publicError("[work] send failed", e);
+  }
 }

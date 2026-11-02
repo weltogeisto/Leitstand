@@ -6,6 +6,7 @@ import { workFinished, workInput, workMessage, workThreadId } from "../../src/li
 import type { Task } from "../../src/lib/types";
 import { GET, POST } from "../../src/app/api/work/route";
 import { updateTask } from "../../src/lib/store";
+import { resolveWorkSettings, workSettingsLabel } from "../../src/lib/work-settings";
 
 process.env.MC_TOKEN = "work-test-token";
 process.env.MC_DASHBOARD_PASSWORD = "test-password";
@@ -48,7 +49,35 @@ test("follow-up keeps project and server-side ancestry, and blocks a running par
   const response = await POST(request({ ...input, parent_id: 1, thread_id: 999, history: "invented" }));
   assert.equal(response.status, 200);
   const envelope = inserted.find(v => typeof v === "string" && v.startsWith('{"leitstand_work"')) as string;
-  assert.deepEqual(JSON.parse(envelope), { leitstand_work: 1, message: input.message, parent_id: 1, thread_id: 1 });
+  assert.deepEqual(JSON.parse(envelope), { leitstand_work: 1, message: input.message, parent_id: 1, thread_id: 1, settings: { model: "gpt-6-astra", effort: "xhigh" } });
+});
+
+function savedSettings() {
+  return JSON.parse(inserted.find(v => typeof v === "string" && v.startsWith('{"leitstand_work"')) as string).settings;
+}
+test("selected model and effort are saved, inherited and can change per follow-up", async () => {
+  const settings = { model: "gpt-6.1-sol", effort: "low" };
+  assert.equal((await POST(request({ ...input, ...settings }))).status, 200);
+  assert.deepEqual(savedSettings(), settings);
+  rows.set(20, task(20, { description: JSON.stringify({ leitstand_work: 1, message: "First", parent_id: null, thread_id: null, settings }) }));
+  assert.equal((await POST(request({ ...input, parent_id: 20 }))).status, 200);
+  assert.deepEqual(savedSettings(), settings);
+  assert.equal((await POST(request({ ...input, parent_id: 20, effort: "max" }))).status, 200);
+  assert.deepEqual(savedSettings(), { ...settings, effort: "max" });
+  assert.equal((await POST(request({ ...input, parent_id: 20, model: "gpt-6-luna" }))).status, 200);
+  assert.deepEqual(savedSettings(), { model: "gpt-6-luna", effort: "medium" });
+  assert.equal((await POST(request({ ...input, parent_id: 20, platform: "claude-code", model: "claude-sonnet-5-5", effort: "high" }))).status, 200);
+  assert.deepEqual(savedSettings(), { model: "claude-sonnet-5-5", effort: "high" });
+  assert.equal(workSettingsLabel("codex", settings), "GPT-6.1 Sol · Low effort");
+  assert.equal(workSettingsLabel("codex"), "Previous runner defaults");
+});
+test("model settings reject cross-provider choices, unsupported efforts and argument injection", async () => {
+  for (const settings of [
+    { model: "claude-opus-5-5" }, { model: "--dangerously-bypass-approvals-and-sandbox" },
+    { model: { name: "gpt-6-astra" } }, { model: null }, { effort: null }, { effort: 3 },
+    { model: "gpt-6-luna", effort: "ultra" }, { effort: 'high"\nnetwork_access=true' },
+  ]) assert.equal((await POST(request({ ...input, ...settings }))).status, 400);
+  assert.throws(() => resolveWorkSettings("claude-code", { model: "claude-opus-5-5", effort: "ultra" }));
 });
 test("saved conversation is available after reload, without unrelated project history", async () => {
   // PostgreSQL bigint ids arrive as strings. Conversation links must remain numbers.

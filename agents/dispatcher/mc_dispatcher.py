@@ -386,18 +386,21 @@ def run_contained(cmd: list[str], cwd: Path, timeout: float) -> tuple[int, str, 
         )
 
 
-def run_cli(platform: str, prompt: str, cwd: Path, review: bool = False) -> tuple[bool, str, float | None]:
+def run_cli(platform: str, prompt: str, cwd: Path, review: bool = False, settings: dict | None = None) -> tuple[bool, str, float | None]:
     """Run one headless agent turn. Returns (ok, output_text, cost_usd)."""
     extra = os.environ.get(f"MC_{platform.split('-')[0].upper()}_ARGS", "").split()
+    from work_settings import cli_args
+    selected_args = cli_args(platform, settings)
     if platform == "claude-code":
         cmd = ["claude", "-p", prompt, "--output-format", "json"]
         cmd += ["--permission-mode", "default"] if review else (
             extra or ["--permission-mode", "acceptEdits"]
         )
+        cmd += selected_args
     elif platform == "codex":
         cmd = ["codex", "exec"]
         cmd += ["-s", "read-only"] if review else (extra or ["-s", "workspace-write", "-c", 'approval_policy="never"'])
-        cmd += [prompt]
+        cmd += selected_args + [prompt]
     elif platform == "grok":
         cmd = ["grok", "-p", prompt] + ([] if review else extra)
     else:
@@ -683,6 +686,10 @@ def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
         if cancellation:
             cancellation.start()
         project = task.get("project")
+        settings = (work_turn(task) or {}).get("settings")
+        if settings is not None:
+            from work_settings import validate
+            settings = validate(platform, settings)
         runtime = RUNTIME_FOR_PLATFORM.get(platform)
         try:
             if runtime is None:
@@ -729,7 +736,10 @@ def run_task(task: dict, platform: str, sem: threading.Semaphore) -> None:
             if progress.get("task", {}).get("status") == "cancelled":
                 raise RunCancelled()
             ingest("status", f"Running task #{tid}: {task['title']}", agent_id, platform, {"task_id": tid})
-            ok, output, cost = run_cli(platform, build_prompt(task, injection.changed and block != ""), cwd)
+            run_options = {"settings": settings} if settings is not None else {}
+            if settings:
+                print(f"[dispatch] task={tid} platform={platform} model={settings['model']} effort={settings['effort']}", flush=True)
+            ok, output, cost = run_cli(platform, build_prompt(task, injection.changed and block != ""), cwd, **run_options)
         finally:
             try:
                 ak_pointers.cleanup(injection)

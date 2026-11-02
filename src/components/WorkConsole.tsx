@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Markdown } from "./Markdown";
-import { WORK_MESSAGE_LIMIT, WORK_PLATFORMS, WORK_PROJECTS, workFinished, workMessage, workStatus, workThreadId } from "@/lib/work";
+import { WORK_MESSAGE_LIMIT, WORK_PLATFORMS, WORK_PROJECTS, workFinished, workMessage, workStatus, workThreadId, workTurn } from "@/lib/work";
+import { defaultWorkSettings, EFFORT_HELP, EFFORT_NAMES, resolveWorkSettings, WORK_MODELS, workSettingsLabel, type WorkSettings } from "@/lib/work-settings";
 import type { Task } from "@/lib/types";
 import "./work.css";
 
@@ -31,6 +32,8 @@ export default function WorkConsole() {
   const [conversation, setConversation] = useState<Task[]>([]);
   const [project, setProject] = useState("leitstand");
   const [platform, setPlatform] = useState("codex");
+  const [settings, setSettings] = useState<WorkSettings>(() => defaultWorkSettings("codex"));
+  const preferences = useRef<Record<string, WorkSettings>>({});
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -43,10 +46,25 @@ export default function WorkConsole() {
   const input = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("leitstand-work-settings-v1") || "{}");
+      for (const agent of WORK_PLATFORMS) {
+        if (saved[agent.id]) preferences.current[agent.id] = resolveWorkSettings(agent.id, saved[agent.id]);
+      }
+    } catch { /* Local storage is optional; the saved conversation is authoritative. */ }
+  }, []);
+
+  useEffect(() => {
     const requested = params.get("project")?.toLowerCase();
     if (requested && WORK_PROJECTS.some(p => p.id === requested)) setProject(requested);
     const agent = params.get("agent");
-    if (WORK_PLATFORMS.some(p => p.id === agent)) setPlatform(agent!);
+    if (!selectedId) {
+      const next = WORK_PLATFORMS.some(p => p.id === agent) ? agent! : platform;
+      setPlatform(next);
+      setSettings(preferences.current[next] ?? defaultWorkSettings(next));
+    }
+    // URL navigation restores preferences once, without overwriting draft selections on polling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params]);
 
   useEffect(() => {
@@ -86,6 +104,31 @@ export default function WorkConsole() {
   const chosenProject = last?.project || project;
   const projectName = WORK_PROJECTS.find(p => p.id === chosenProject)?.name || chosenProject;
   const recent = [...new Map([...all].reverse().map(t => [workThreadId(t), t])).values()].sort((a, b) => b.id - a.id);
+  const lastId = last?.id;
+  useEffect(() => {
+    if (!last) return;
+    const agent = WORK_PLATFORMS.some(p => p.id === last.platform) ? last.platform : "codex";
+    setPlatform(agent);
+    try { setSettings(resolveWorkSettings(agent, workTurn(last)?.settings)); }
+    catch { setSettings(defaultWorkSettings(agent)); }
+    // Restore when opening a different turn, never on a background status refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastId]);
+
+  function remember(agent: string, chosen: WorkSettings) {
+    preferences.current[agent] = chosen;
+    try { localStorage.setItem("leitstand-work-settings-v1", JSON.stringify(preferences.current)); } catch { /* Optional. */ }
+    setSettings(chosen);
+  }
+  function changeAgent(agent: string) {
+    setPlatform(agent);
+    remember(agent, preferences.current[agent] ?? defaultWorkSettings(agent));
+  }
+  function changeModel(model: string) {
+    const selectedModel = WORK_MODELS[platform].models.find(m => m.id === model)!;
+    remember(platform, { model, effort: selectedModel.efforts.includes(settings.effort) ? settings.effort : selectedModel.default_effort });
+  }
+  const selectedModel = WORK_MODELS[platform].models.find(m => m.id === settings.model);
 
   const choose = useCallback((task: Task) => {
     if (busy) return;
@@ -104,7 +147,7 @@ export default function WorkConsole() {
   async function send(e: React.FormEvent) {
     e.preventDefault();
     if (busy || active || !message.trim()) return;
-    const body = JSON.stringify({ message: message.trim(), project: chosenProject, platform, parent_id: last?.id ?? null });
+    const body = JSON.stringify({ message: message.trim(), project: chosenProject, platform, ...settings, parent_id: last?.id ?? null });
     if (attempt.current?.body !== body) attempt.current = { body, key: crypto.randomUUID() };
     setBusy(true); setSendError("");
     try {
@@ -156,7 +199,7 @@ export default function WorkConsole() {
           {earlier && <a className="work-link" href={`/work?task=${earlier}`}>View earlier conversation</a>}
           {turns.map(t => <article key={t.id} className="work-turn">
             <div className="work-user"><small>You · #{t.id}</small><p>{workMessage(t)}</p></div>
-            <div className="work-reply"><small>{WORK_PLATFORMS.find(p => p.id === t.platform)?.name || t.platform} · {workStatus(t)}</small>
+            <div className="work-reply"><small>{WORK_PLATFORMS.find(p => p.id === t.platform)?.name || t.platform} · {workStatus(t)}<span className="work-run-settings">{workSettingsLabel(t.platform, workTurn(t)?.settings)}</span></small>
               {t.result ? <Markdown source={t.result.replace(/^\[stopped\]\s*/, "")} /> : <p className="work-note" role="status">{t.status === "queued" ? "Saved and queued. Your PC picks up work automatically, usually within 30 seconds when it is free. You can leave this page." : t.status === "claimed" ? "Preparing the project workspace…" : t.status === "cancelled" ? "Waiting for the worker to confirm it has stopped…" : "Working on your request. The reply will appear here when the run finishes."}</p>}
               {t.result && <a className="work-link" href={`data:text/plain;charset=utf-8,${encodeURIComponent(`${workMessage(t)}\n\n${t.result}`)}`} download={`leitstand-${t.id}.txt`}>Download reply</a>}
             </div>
@@ -164,8 +207,13 @@ export default function WorkConsole() {
         </div>
         <form className="work-compose" onSubmit={send}>
           <div className="work-selects">{!last && <label>Project<select aria-label="Project" value={project} onChange={e => setProject(e.target.value)} disabled={busy}>{WORK_PROJECTS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
-            <label>Agent<select aria-label="Agent" value={platform} onChange={e => setPlatform(e.target.value)} disabled={busy || !!active}>{WORK_PLATFORMS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+            <label>Agent<select aria-label="Agent" value={platform} onChange={e => changeAgent(e.target.value)} disabled={busy || !!active}>{WORK_PLATFORMS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
           </div>
+          <div className="work-model-selects">
+            <label>Model<select aria-label="Model" value={settings.model} onChange={e => changeModel(e.target.value)} disabled={busy || !!active}>{WORK_MODELS[platform].models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>
+            <label>Reasoning effort<select aria-label="Reasoning effort" aria-describedby="work-effort-help" value={settings.effort} onChange={e => remember(platform, { ...settings, effort: e.target.value })} disabled={busy || !!active}>{selectedModel?.efforts.map(e => <option key={e} value={e}>{EFFORT_NAMES[e] ?? e}</option>)}</select></label>
+          </div>
+          <p className="work-settings-help" id="work-effort-help">{EFFORT_HELP[settings.effort]} {active ? "These settings are fixed for this run." : last ? "Changes apply to your next message." : "Your choices are remembered on this device."}{platform === "claude-code" && " Model access depends on your Claude plan."}</p>
           <label htmlFor="work-message">{last ? "Follow-up instructions" : "Your instructions"}</label>
           <textarea ref={input} id="work-message" value={message} maxLength={WORK_MESSAGE_LIMIT} rows={4} onChange={e => setMessage(e.target.value)} disabled={busy} placeholder={last ? "Ask a question or tell the agent what to do next…" : "Describe what you want done…"} />
           {sendError && <p role="alert" className="work-error">{sendError}</p>}

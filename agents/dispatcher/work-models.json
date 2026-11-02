@@ -1,0 +1,29 @@
+{
+  "verified_on": "2026-11-02",
+  "platforms": {
+    "codex": {
+      "default_model": "gpt-6-astra",
+      "default_effort": "xhigh",
+      "models": [
+        { "id": "gpt-6.1-sol", "name": "GPT-6.1 Sol", "default_effort": "low", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+        { "id": "gpt-6-astra", "name": "GPT-6 Astra", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+        { "id": "gpt-6.1-terra", "name": "GPT-6.1 Terra", "default_effort": "low", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+        { "id": "gpt-6-sol", "name": "GPT-6 Sol", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+        { "id": "gpt-6-luna", "name": "GPT-6 Luna", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        { "id": "gpt-5.6-sol", "name": "GPT-5.6 Sol", "default_effort": "low", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+        { "id": "gpt-5.6-terra", "name": "GPT-5.6 Terra", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"] },
+        { "id": "gpt-5.6-luna", "name": "GPT-5.6 Luna", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max"] }
+      ]
+    },
+    "claude-code": {
+      "default_model": "claude-opus-5-5",
+      "default_effort": "medium",
+      "models": [
+        { "id": "claude-opus-5-5", "name": "Claude Opus 5.5", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        { "id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        { "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "default_effort": "medium", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        { "id": "claude-fable-5-1", "name": "Claude Fable 5.1", "default_effort": "high", "efforts": ["low", "medium", "high", "xhigh", "max"] }
+      ]
+    }
+  }
+}
