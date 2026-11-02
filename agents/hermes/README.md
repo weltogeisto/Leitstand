@@ -11,18 +11,30 @@ to remember to call an MCP tool. It observes:
 - Topic-owned background processes and asynchronous delegations.
 - Enabled cron schedules, running executions, next run and last recorded activity.
 
-The reporter projects only metadata from SQLite/JSON. Commands, prompts, message
-text, results and Telegram identifiers are not sent to Leitstand. Credentials stay
-in the private service configuration. The installed service polls every 15 seconds
+By default the reporter projects only activity metadata from SQLite/JSON. With
+`share_work_details: true` explicitly enabled for a topic, it also sends bounded,
+redacted task briefs, the latest user-visible assistant update, result excerpts,
+and schedule names to the private dashboard. It never reads private reasoning
+columns or exports raw tool output, transcripts, provider config, or Telegram
+identifiers. Commands in code fences and credential-like text are removed. This
+uses the existing status-write credential and grants no new control permissions.
+Credentials stay in the private service configuration. The service polls every 15 seconds
 plus request time; short work may appear as a new last-activity timestamp without
 being caught in the running state. External services without a local process or
 execution record require a separate reporter. Unverifiable process ownership or
 unavailable metadata is reported as unknown/needs checking, not idle.
 
-Fleet and filtered History show the last connection check separately from the
-last work activity and next scheduled run. A connected gateway is not evidence
+Work details are sent on meaningful changes and refreshed every five minutes;
+ordinary heartbeats carry only activity metadata. The UI combines the latest
+work snapshot with fresh status, and keeps completed subtasks separate from
+running work. Large results are labeled as excerpts. Complete conversations
+remain in Hermes. Disable sharing by removing `share_work_details` from a topic;
+previously stored history is retained.
+
+Fleet and filtered History show the work first and connection timing separately.
+A connected gateway is not evidence
 that all work is finished. Automated regression checks live in
-`tests/unit/test_hermes_topics.py`.
+`tests/unit/test_hermes_topics.py` and `tests/unit/test_hermes_work_details.py`.
 
 The optional MCP integration below is separate from this status-only setup and
 requires additional permissions if enabled.

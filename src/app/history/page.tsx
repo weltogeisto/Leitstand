@@ -9,7 +9,9 @@ import { Pager } from "@/components/Pager";
 import { isBackground } from "@/lib/events";
 import { filterEvents, historySessions, paginate, sessionSpan, shortId, type HistorySession } from "@/lib/history";
 import type { Event, FleetAgent } from "@/lib/types";
-import { buildStrips } from "@/lib/leitstand-board";
+import { buildStrips, topicTelemetry } from "@/lib/leitstand-board";
+import {AgentWorkDetails} from "@/components/AgentWorkDetails";
+import {agentWork} from "@/lib/agent-work";
 
 const SESSIONS_PER_PAGE = 10;
 const EVENTS_PER_PAGE = 25;
@@ -41,7 +43,7 @@ function History() {
 
   return (
     <div>
-      <div className="ds-heading"><div><p className="ds-eyebrow">Activity log</p><h1>History</h1><p className="ds-description">Sessions and status changes across your agents.</p></div></div>
+      <div className="ds-heading"><div><p className="ds-eyebrow">Activity log</p><h1>{selected?.platform==="hermes"?(selected.display_name||selected.id).replace(/^Hermes · /,""):"History"}</h1><p className="ds-description">{selected?.platform==="hermes"?"Current work, updates, and results.":"Sessions and status changes across your agents."}</p></div></div>
       <div className="history-toolbar">
         <label>
           Agent
@@ -87,7 +89,8 @@ function History() {
 function TopicActivity({agent,events}:{agent:FleetAgent;events:Event[]}) {
   const item = buildStrips([agent],[],events)[0];
   if (!item) return null;
-  return <section className="history-live" aria-label="Current topic status"><h2>{item.title}</h2><dl><div><dt>Last checked</dt><dd><TimeAgo iso={item.at}/></dd></div><div><dt>Last recorded work</dt><dd>{item.activityAt ? <TimeAgo iso={item.activityAt}/> : "Not reported"}</dd></div><div><dt>Next scheduled run</dt><dd>{item.nextAt ? <time dateTime={item.nextAt}>{new Date(item.nextAt).toLocaleString([], {weekday:"short",hour:"2-digit",minute:"2-digit"})}</time> : "None reported"}</dd></div></dl><p>Activity includes local turns, background processes, delegations, and scheduled jobs. Conversation text stays in Telegram. External jobs may not be visible here.</p></section>;
+  const detail = topicTelemetry(agent.id,events)?.detail;
+  return <><AgentWorkDetails detail={detail}/><details className="history-live"><summary className="cursor-pointer text-xs text-gray-400">Connection & timing · {item.title}</summary><dl className="mt-4"><div><dt>Last checked</dt><dd><TimeAgo iso={item.at}/></dd></div><div><dt>Last recorded work</dt><dd>{item.activityAt ? <TimeAgo iso={item.activityAt}/> : "Not reported"}</dd></div><div><dt>Next scheduled run</dt><dd>{item.nextAt ? <time dateTime={item.nextAt}>{new Date(item.nextAt).toLocaleString([], {weekday:"short",hour:"2-digit",minute:"2-digit"})}</time> : "None reported"}</dd></div></dl><p>Briefs and result excerpts are redacted before reporting. Full conversations stay in Telegram; external jobs may need their own connection.</p></details></>;
 }
 
 function HistoryLists({
@@ -105,8 +108,8 @@ function HistoryLists({
   const [eventPage, setEventPage] = useState(1);
   const [hideBackground, setHideBackground] = useState(true);
 
-  const sessions = useMemo(() => historySessions(agents, events, agentId), [agents, events, agentId]);
-  const timeline = useMemo(() => filterEvents(events, { agentId, hideBackground }), [events, agentId, hideBackground]);
+  const sessions = useMemo(() => historySessions(agents, events, agentId).filter(h=>!(h.platform==="hermes"&&h.session.id.endsWith("-status"))), [agents, events, agentId]);
+  const timeline = useMemo(() => filterEvents(events, { agentId, hideBackground }).filter(e=>!hideBackground||!e.detail?.work_snapshot_only), [events, agentId, hideBackground]);
   const backgroundCount = useMemo(
     () => events.filter((e) => (!agentId || e.agent_id === agentId) && isBackground(e)).length,
     [events, agentId],
@@ -127,14 +130,14 @@ function HistoryLists({
 
   return (
     <>
-      <h2 className="history-section-title">Recent sessions</h2>
+      {sessions.length>0&&<><h2 className="history-section-title">Recent sessions</h2>
       <div className="history-sessions">
         {sPage.items.map((h) => (
           <SessionRow key={`${h.agentId}:${h.session.id}`} h={h} now={now} showAgent={!agentId} onAgent={onAgent} />
         ))}
         {sessions.length === 0 && <div className="history-empty">No sessions reported for this agent yet.</div>}
       </div>
-      <Pager page={sPage} onPage={setSessionPage} noun="sessions" />
+      <Pager page={sPage} onPage={setSessionPage} noun="sessions" /></>}
 
       <div className="mb-2 mt-8 flex flex-wrap items-center gap-3">
         <h2 className="history-section-title !mb-0">Timeline</h2>
@@ -159,6 +162,7 @@ function HistoryLists({
               <TimeAgo iso={e.created_at} /> · {names[e.agent_id] ?? e.agent_id} · {e.detail?.topic_scoped ? "Status update" : e.kind.replaceAll("_", " ")}
             </div>
             <div className="text-sm text-gray-300">{e.title ?? <span className="text-gray-600">(no title)</span>}</div>
+            {agentWork(e.detail).slice(0,2).map(w=><p key={w.id} className="mt-1 text-xs text-gray-400">{w.title}</p>)}
           </li>
         ))}
         {timeline.length === 0 && (

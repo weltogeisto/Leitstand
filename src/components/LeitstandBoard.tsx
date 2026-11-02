@@ -8,14 +8,17 @@ import { WORK_PROJECTS } from "@/lib/work";
 import { WorkIcon } from "./WorkIcon";
 import { TimeAgo } from "./ui";
 import "./fleet.css";
+import "./agent-work.css";
 
 type Project = { name: string; repo: string; description: string | null; url: string; language: string | null; archived: boolean };
 const BAYS: Record<Bay, string> = { moving: "Running", needs: "Needs you", stuck: "Check connection", quiet: "Connected & scheduled" };
 const SOURCE_NAMES: Record<Source, string> = { claude: "Claude", openai: "Codex", hermes: "Hermes", jobs: "Other" };
 function AgentRow({ item }: { item: Strip }) {
+  const work = item.workItems?.find(w=>w.status==="running") ?? item.workItems?.[0];
+  const running = item.workItems?.filter(w=>w.status==="running").length ?? 0;
   return <li className={`fleet-row fleet-${item.bay}`}>
     <span className={`fleet-avatar fleet-avatar-${item.source}`} aria-hidden="true">{item.source === "hermes" ? "H" : item.source === "openai" ? "C" : item.source === "claude" ? "✳" : "↗"}</span>
-    <div className="fleet-agent"><Link href={item.href}><h3>{item.who.replace(/^Hermes · /, "")}</h3><span className="fleet-agent-arrow">↗</span></Link><p className="fleet-state"><i/>{item.title}</p><div className="fleet-row-meta"><span>{item.source === "hermes" ? "Hermes · " : ""}{item.text.replace(" · Hermes_Hegel topic", "")}</span>{item.activityAt && <span>Activity <TimeAgo iso={item.activityAt}/></span>}</div>{item.nextAt && <p className="fleet-next">Next run <time dateTime={item.nextAt}>{new Date(item.nextAt).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</time></p>}</div>
+    <div className="fleet-agent"><Link href={item.href}><h3>{item.who.replace(/^Hermes · /, "")}</h3><span className="fleet-agent-arrow">↗</span></Link><p className="fleet-state"><i/>{item.title}</p>{work&&<><Link className="fleet-work-title" href={item.href}>{work.status==="running"?"":"Last work: "}{work.title}</Link>{running>1&&<p className="fleet-work-count">+{running-1} more task{running>2?"s":""} running</p>}{item.workUpdate&&<p className="fleet-work-progress">{item.workUpdate}</p>}</>}<div className="fleet-row-meta"><span>{item.source === "hermes" ? "Hermes · " : ""}{item.text.replace(" · Hermes_Hegel topic", "")}</span>{item.activityAt && <span>Activity <TimeAgo iso={item.activityAt}/></span>}</div>{item.nextAt && <p className="fleet-next">Next run <time dateTime={item.nextAt}>{new Date(item.nextAt).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</time></p>}</div>
     <div className="fleet-check"><span>Checked</span><TimeAgo iso={item.at}/></div>
   </li>;
 }
@@ -36,7 +39,7 @@ export default function LeitstandBoard() {
     return () => { alive = false; clearInterval(taskTimer); clearInterval(repoTimer); };
   }, []);
   const strips = buildStrips(data?.agents ?? [], tasks, data?.events ?? []);
-  const visible = strips.filter(s => (filter === "all" || s.source === filter) && `${s.who} ${s.title} ${s.text}`.toLowerCase().includes(query.toLowerCase()));
+  const visible = strips.filter(s => (filter === "all" || s.source === filter) && `${s.who} ${s.title} ${s.text} ${s.workItems?.map(w=>w.title).join(" ") ?? ""}`.toLowerCase().includes(query.toLowerCase()));
   const counts = (bay: Bay) => strips.filter(s => s.bay === bay).length;
   const bays: Bay[] = ["moving", "needs", "stuck", "quiet"];
   return <div className="fleet-page">
@@ -47,7 +50,7 @@ export default function LeitstandBoard() {
     {!data && !error && <p className="history-empty">Connecting to your agents…</p>}
     {data && visible.length === 0 && <p className="history-empty">No agents match this filter.</p>}
     <div className="fleet-groups">{bays.map(b => { const items = visible.filter(s => s.bay === b); return <section id={`fleet-${b}`} key={b} className={`fleet-group ${items.length ? "" : "fleet-empty-group"}`} aria-label={BAYS[b]}>{items.length > 0 && <><div className="fleet-group-heading"><h2>{BAYS[b]}</h2><span>{items.length}</span></div><ul>{items.map(item => <AgentRow key={item.id} item={item}/>)}</ul></>}</section>; })}</div>
-    <p className="fleet-coverage">Hermes reports local chat turns, background processes, delegations, and scheduled jobs. “Checked” is the last connection update; “Activity” is the last recorded work. External services may need their own connection.</p>
+    <p className="fleet-coverage">Open an agent to see its task briefs, latest update, and results. “Checked” is the connection update; “Activity” is the last recorded work.</p>
     <section className="fleet-projects"><div className="fleet-group-heading"><h2>Projects</h2><Link href="/work">Start a conversation ↗</Link></div>{repoError && <p className="ds-notice">Repository details are unavailable. You can still open your projects in Work.</p>}<div className="fleet-project-grid">{(allProjects ? WORK_PROJECTS : WORK_PROJECTS.slice(0,6)).map(p => { const repo = projects.find(r => r.repo.toLowerCase() === p.repository.toLowerCase()); return <Link key={p.id} href={`/work?project=${encodeURIComponent(p.id)}`}><WorkIcon name="folder"/><div><h3>{p.name}</h3><p>{repo?.description || p.repository}</p></div><span>↗</span></Link>; })}</div>{WORK_PROJECTS.length > 6 && <button className="fleet-more-projects" onClick={() => setAllProjects(!allProjects)}>{allProjects ? "Show fewer projects" : `View all ${WORK_PROJECTS.length} projects`}</button>}{projects.length > 0 && <details className="fleet-repos"><summary>Repository details <span>{projects.length}</span></summary><div>{projects.map(p => <a key={p.repo} href={p.url} target="_blank" rel="noreferrer">{p.name}<small>{p.archived ? "Archived" : p.language}</small><span>↗</span></a>)}</div></details>}</section>
   </div>;
 }

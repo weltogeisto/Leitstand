@@ -1,4 +1,4 @@
-"""Read Hermes gateway/topic status without selecting conversation content."""
+"""Read Hermes activity plus explicitly enabled, redacted work briefs."""
 from datetime import datetime, timezone
 from contextlib import closing
 import json
@@ -172,6 +172,16 @@ def snapshot(home, item, now=None):
             detail = topic_activity(home, item, identities, session_id, now)
         count = sum(process_alive(e.get('pid'), e.get('process_start_time')) for e in entries)
         background = sum(detail.get(k, 0) for k in ('background_processes','delegated_work','running_jobs'))
+        if item.get('share_work_details') and 'thread_id' in item:
+            try:
+                from work_details import work_details
+                detail.update(work_details(home, item, identities, session_id, now, bool(count or background), kernel_process_alive))
+            except (OSError, ValueError, KeyError, TypeError, sqlite3.Error, StatusUnavailable):
+                # Work descriptions are optional; a bad description source must not
+                # erase the independently verified running-state signal.
+                detail['work_details_unavailable'] = True
+        else:
+            detail['work_details_enabled'] = False
         status = 'active' if count or background else 'waiting' if suspended else 'failed' if not detail.get('status_known', True) else 'done'
         if count: title = 'Working in chat' if count == 1 else f'{count} chat turns running'
         elif background: title = f'{background} background job' + ('s' if background != 1 else '') + ' running'

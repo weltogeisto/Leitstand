@@ -1,11 +1,16 @@
 import type { Event, FleetAgent, Task } from "./types";
+import {agentWork,workUpdate,type AgentWork} from "./agent-work";
 
 export type Source = "claude" | "openai" | "hermes" | "jobs";
 export type Bay = "needs" | "moving" | "stuck" | "quiet";
-export type Strip = { id: string; source: Source; bay: Bay; who: string; title: string; text: string; at: string | null; activityAt?: string | null; nextAt?: string | null; scheduled?: number; href: string; action: string };
+export type Strip = { id: string; source: Source; bay: Bay; who: string; title: string; text: string; at: string | null; activityAt?: string | null; nextAt?: string | null; scheduled?: number; workItems?:AgentWork[]; workUpdate?:string; href: string; action: string };
 export function topicTelemetry(agentId: string, events: Event[]) {
-  return events.filter(e => e.agent_id === agentId && e.detail?.topic_scoped === true)
-    .sort((a,b) => Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+  const own = events.filter(e => e.agent_id === agentId && e.detail?.topic_scoped === true)
+    .sort((a,b) => Date.parse(b.created_at)-Date.parse(a.created_at));
+  const latest=own[0];
+  if(!latest||latest.detail?.work_details_enabled===false)return latest;
+  const work=own.find(e=>Array.isArray(e.detail?.work_items));
+  return work ? {...latest,detail:{...work.detail,...latest.detail}} : latest;
 }
 function timestamp(value: unknown): string | null {
   return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
@@ -33,6 +38,7 @@ export function buildStrips(agents: FleetAgent[], tasks: Task[], events: Event[]
       at: a.last_seen_at,
       activityAt: timestamp(detail?.last_activity_at), nextAt: timestamp(detail?.next_run_at),
       scheduled: typeof detail?.scheduled_jobs === "number" ? detail.scheduled_jobs : undefined,
+      workItems: agentWork(detail), workUpdate: workUpdate(detail).text,
       href: task ? `/work?task=${task.id}` : canWork ? `/work?agent=${encodeURIComponent(a.platform)}` : `/history?agent=${encodeURIComponent(a.id)}`,
       action: task ? "Open work" : canWork ? "Start work" : "View activity" };
   });
