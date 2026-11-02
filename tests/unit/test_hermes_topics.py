@@ -23,6 +23,8 @@ class TopicStatusTests(unittest.TestCase):
         self.db = sqlite3.connect(self.home / 'state.db')
         self.addCleanup(self.db.close)
         self.db.execute('CREATE TABLE gateway_routing (scope TEXT, session_key TEXT, entry_json TEXT)')
+        self.db.execute('CREATE TABLE sessions (id TEXT, last_activity_at REAL)')
+        self.db.execute('CREATE TABLE async_delegations (parent_session_id TEXT, origin_session TEXT, state TEXT, owner_pid INTEGER, owner_started_at INTEGER)')
         self.items = []
         for n in range(4):
             item = {'home': str(self.home), 'chat_id': 'chat', 'thread_id': str(n),
@@ -70,6 +72,64 @@ class TopicStatusTests(unittest.TestCase):
         self.assertEqual(ts.snapshot(self.home, self.items[2])[0], 'waiting')
         self.assertEqual(ts.snapshot(self.home, self.items[0])[0], 'done')
 
+    def test_managed_worker_need_not_share_gateway_pid(self):
+        self.entries([self.lease('session-1', pid=123)])
+        with patch.object(ts, 'process_alive', return_value=True):
+            self.assertEqual(ts.snapshot(self.home, self.items[1])[0], 'active')
+            self.assertEqual(ts.snapshot(self.home, self.items[0])[0], 'done')
+
+    def test_background_process_is_scoped_and_does_not_leak_command(self):
+        (self.home / 'processes.json').write_text(json.dumps([
+            {'session_key': 'gateway:chat:default:2', 'pid': 77, 'host_start_time': 100,
+             'command': 'PRIVATE_COMMAND_SENTINEL', 'pid_scope': 'host'}]))
+        with patch.object(ts, 'kernel_process_alive', return_value=True):
+            status, title, detail = ts.snapshot(self.home, self.items[2])
+            self.assertEqual(status, 'active')
+            self.assertEqual(detail['background_processes'], 1)
+            self.assertEqual(ts.snapshot(self.home, self.items[1])[0], 'done')
+            self.assertNotIn('PRIVATE_', json.dumps([title, detail]))
+        with patch.object(ts, 'kernel_process_alive', return_value=False):
+            self.assertEqual(ts.snapshot(self.home, self.items[2])[0], 'done')
+
+    def test_unverifiable_remote_process_is_not_idle(self):
+        (self.home / 'processes.json').write_text(json.dumps([
+            {'session_key': 'session-0', 'pid_scope': 'container', 'pid': 42}]))
+        status, _, detail = ts.snapshot(self.home, self.items[0])
+        self.assertEqual(status, 'failed')
+        self.assertFalse(detail['status_known'])
+
+    def test_delegation_is_scoped_and_dead_owner_is_unknown(self):
+        self.db.execute('INSERT INTO async_delegations VALUES (?,?,?,?,?)', ('session-3','','running',77,100))
+        self.db.commit()
+        with patch.object(ts, 'kernel_process_alive', return_value=True):
+            self.assertEqual(ts.snapshot(self.home, self.items[3])[0], 'active')
+            self.assertEqual(ts.snapshot(self.home, self.items[2])[0], 'done')
+        with patch.object(ts, 'kernel_process_alive', return_value=False):
+            self.assertEqual(ts.snapshot(self.home, self.items[3])[0], 'failed')
+
+    def test_schedule_and_last_activity_are_not_heartbeat_time(self):
+        cron = self.home / 'cron'; cron.mkdir()
+        (cron / 'jobs.json').write_text(json.dumps({'jobs':[
+            {'id':'job','enabled':True,'next_run_at':'2026-11-03T06:00:00+00:00',
+             'last_run_at':'2026-11-02T06:00:00+00:00','prompt':'PRIVATE_PROMPT_SENTINEL',
+             'origin':{'platform':'telegram','chat_id':'chat','thread_id':'1'}},
+            {'id':'other','enabled':True,'origin':{'platform':'telegram','chat_id':'other','thread_id':'1'}}]}))
+        with contextlib.closing(sqlite3.connect(cron / 'executions.db')) as db:
+            db.execute('CREATE TABLE executions (job_id TEXT,pid INTEGER,process_started_at INTEGER,status TEXT,finished_at TEXT,claimed_at TEXT)')
+            db.execute("INSERT INTO executions VALUES ('job',77,100,'completed','2026-11-02T06:02:00+00:00','2026-11-02T06:00:00+00:00')")
+            db.commit()
+        status, title, detail = ts.snapshot(self.home, self.items[1], now=1793650000)
+        self.assertEqual(status,'done')
+        self.assertEqual(detail['scheduled_jobs'],1)
+        self.assertEqual(detail['last_activity_at'],'2026-11-02T06:02:00+00:00')
+        self.assertEqual(ts.snapshot(self.home,self.items[0])[2]['scheduled_jobs'],0)
+        self.assertNotIn('PRIVATE_',json.dumps([title,detail]))
+        with contextlib.closing(sqlite3.connect(cron / 'executions.db')) as db:
+            db.execute("UPDATE executions SET status='running',finished_at=NULL")
+            db.commit()
+        with patch.object(ts,'kernel_process_alive',return_value=True):
+            self.assertEqual(ts.snapshot(self.home,self.items[1])[0],'active')
+
     def test_unavailable_metadata_is_not_idle(self):
         self.assertEqual(ts.snapshot(self.home, {**self.items[0], 'thread_id': 'missing'})[0], 'failed')
         (self.home / 'runtime/active_sessions.json').write_text('{broken')
@@ -102,6 +162,19 @@ class TopicStatusTests(unittest.TestCase):
             reporter.report(config, previous)
         self.assertEqual([r['kind'] for r in sent], ['session_start', 'heartbeat'])
         self.assertTrue(all(r['status'] == 'done' for r in sent))
+
+    def test_new_activity_refreshes_summary_without_changing_status(self):
+        sent = []; previous = {}
+        def post(req, timeout):
+            sent.append(json.loads(req.data)); return io.BytesIO(b'{"ok":true}')
+        with patch.object(reporter.urllib.request, 'urlopen', side_effect=post), contextlib.redirect_stdout(io.StringIO()):
+            config = {'url':'https://example.invalid','profiles':self.items[:1]}
+            reporter.report(config,previous)
+            self.db.execute("INSERT INTO sessions VALUES ('session-0', 1793645000)"); self.db.commit()
+            reporter.report(config,previous)
+            reporter.report(config,previous)
+        self.assertEqual([r['kind'] for r in sent], ['session_start','session_start','heartbeat'])
+        self.assertEqual(sent[1]['detail']['last_activity_at'], '2026-11-02T18:43:20+00:00')
 
 
 class GatewayHealthTests(unittest.TestCase):

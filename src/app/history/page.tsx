@@ -9,6 +9,7 @@ import { Pager } from "@/components/Pager";
 import { isBackground } from "@/lib/events";
 import { filterEvents, historySessions, paginate, sessionSpan, shortId, type HistorySession } from "@/lib/history";
 import type { Event, FleetAgent } from "@/lib/types";
+import { buildStrips } from "@/lib/leitstand-board";
 
 const SESSIONS_PER_PAGE = 10;
 const EVENTS_PER_PAGE = 25;
@@ -40,14 +41,13 @@ function History() {
 
   return (
     <div>
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        <h1 className="text-lg font-semibold">History</h1>
-        <label className="flex items-center gap-2 text-xs text-gray-500">
+      <div className="ds-heading"><div><p className="ds-eyebrow">Activity log</p><h1>History</h1><p className="ds-description">Sessions and status changes across your agents.</p></div></div>
+      <div className="history-toolbar">
+        <label>
           Agent
           <select
             value={agentId ?? ""}
             onChange={(e) => setAgent(e.target.value || null)}
-            className="rounded-md border border-white/10 bg-[#101828] px-2 py-1 text-sm text-gray-200 focus:border-white/30 focus:outline-none"
           >
             <option value="">All agents ({agents.length})</option>
             {agentId && !selected && <option value={agentId}>{agentId} (not reporting)</option>}
@@ -66,6 +66,8 @@ function History() {
         {error && <span className="text-xs text-amber-400">Refresh failed ({error}); showing last good data.</span>}
       </div>
 
+      {selected?.platform === "hermes" && <TopicActivity agent={selected} events={data.events}/>}
+
       {agentId && !selected ? (
         <div className="rounded-lg border border-white/10 bg-[#101828] px-4 py-6 text-sm text-gray-400">
           No agent with id <span className="mono text-gray-200">{agentId}</span> is in the fleet right now. It may have been renamed or
@@ -80,6 +82,12 @@ function History() {
       )}
     </div>
   );
+}
+
+function TopicActivity({agent,events}:{agent:FleetAgent;events:Event[]}) {
+  const item = buildStrips([agent],[],events)[0];
+  if (!item) return null;
+  return <section className="history-live" aria-label="Current topic status"><h2>{item.title}</h2><dl><div><dt>Last checked</dt><dd><TimeAgo iso={item.at}/></dd></div><div><dt>Last recorded work</dt><dd>{item.activityAt ? <TimeAgo iso={item.activityAt}/> : "Not reported"}</dd></div><div><dt>Next scheduled run</dt><dd>{item.nextAt ? <time dateTime={item.nextAt}>{new Date(item.nextAt).toLocaleString([], {weekday:"short",hour:"2-digit",minute:"2-digit"})}</time> : "None reported"}</dd></div></dl><p>Activity includes local turns, background processes, delegations, and scheduled jobs. Conversation text stays in Telegram. External jobs may not be visible here.</p></section>;
 }
 
 function HistoryLists({
@@ -119,17 +127,17 @@ function HistoryLists({
 
   return (
     <>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-gray-400">Sessions</h2>
-      <div className="grid gap-2">
+      <h2 className="history-section-title">Recent sessions</h2>
+      <div className="history-sessions">
         {sPage.items.map((h) => (
           <SessionRow key={`${h.agentId}:${h.session.id}`} h={h} now={now} showAgent={!agentId} onAgent={onAgent} />
         ))}
-        {sessions.length === 0 && <div className="text-sm text-gray-600">No sessions reported.</div>}
+        {sessions.length === 0 && <div className="history-empty">No sessions reported for this agent yet.</div>}
       </div>
       <Pager page={sPage} onPage={setSessionPage} noun="sessions" />
 
       <div className="mb-2 mt-8 flex flex-wrap items-center gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">Event timeline</h2>
+        <h2 className="history-section-title !mb-0">Timeline</h2>
         <label className="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500">
           <input
             type="checkbox"
@@ -138,7 +146,7 @@ function HistoryLists({
               setHideBackground(e.target.checked);
               setEventPage(1);
             }}
-            className="accent-[#2ee6a6]"
+            className="accent-[#e4af86]"
           />
           Hide heartbeats & telemetry{backgroundCount > 0 && hideBackground ? ` (${backgroundCount} hidden)` : ""}
         </label>
@@ -146,15 +154,15 @@ function HistoryLists({
       <ol className="relative pl-5 before:absolute before:bottom-0 before:left-1.5 before:top-0 before:w-px before:bg-white/10">
         {ePage.items.map((e) => (
           <li key={e.id} className="relative pb-4">
-            <span className={`absolute -left-5 top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-[#0a0f1c] ${eventDot(e)}`} />
+            <span className={`absolute -left-5 top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-[#191a1c] ${eventDot(e)}`} />
             <div className="mono text-xs text-gray-600">
-              <TimeAgo iso={e.created_at} /> · {names[e.agent_id] ?? e.agent_id} · {e.kind}
+              <TimeAgo iso={e.created_at} /> · {names[e.agent_id] ?? e.agent_id} · {e.detail?.topic_scoped ? "Status update" : e.kind.replaceAll("_", " ")}
             </div>
             <div className="text-sm text-gray-300">{e.title ?? <span className="text-gray-600">(no title)</span>}</div>
           </li>
         ))}
         {timeline.length === 0 && (
-          <li className="text-sm text-gray-600">{backgroundCount > 0 ? "Only heartbeats and telemetry in this window." : "No events."}</li>
+          <li className="history-empty">{backgroundCount > 0 ? "No work changes in this window. Connection checks are hidden above." : "No recorded events in this window. Sessions may still appear above."}</li>
         )}
       </ol>
       <Pager page={ePage} onPage={setEventPage} noun="events" />
@@ -165,9 +173,9 @@ function HistoryLists({
 function SessionRow({ h, now, showAgent, onAgent }: { h: HistorySession; now: number; showAgent: boolean; onAgent: (id: string) => void }) {
   const { session: s, title } = h;
   return (
-    <div className="flex items-start gap-4 rounded-lg border border-white/10 bg-[#101828] px-4 py-3 text-sm">
-      <div className="pt-0.5">
-        <StatusChip status={s.status} />
+    <div className="history-session">
+      <div className="history-session-status">
+        {h.platform === "hermes" && s.id.endsWith("-status") ? <small>CONNECTION</small> : <StatusChip status={s.status} />}
       </div>
       <div className="min-w-0 flex-1">
         <div
@@ -176,23 +184,21 @@ function SessionRow({ h, now, showAgent, onAgent }: { h: HistorySession; now: nu
         >
           {title.title}
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+        <div className="history-meta">
           {showAgent && (
             <button type="button" onClick={() => onAgent(h.agentId)} className="text-gray-400 hover:text-white" title="Show only this agent">
               {h.agentName}
             </button>
           )}
-          {s.project && <span className="mono whitespace-nowrap rounded bg-[#7aa5ff]/10 px-1.5 text-[#9dbcff]">{s.project}</span>}
+          {s.project && <span className="history-project">{s.project}</span>}
           <span>
             <time dateTime={s.started_at} title={s.started_at}>
               {startedLabel(s.started_at, now)}
             </time>
             {" · "}
-            {sessionSpan(s, now)}
+            {h.platform === "hermes" && s.id.endsWith("-status") ? "Status reporter" : sessionSpan(s, now)}
           </span>
-          <span className="mono text-gray-600" title={s.id}>
-            {shortId(s.id)}
-          </span>
+          <details><summary className="cursor-pointer">Session details</summary><span className="mono break-all" title={s.id}>{shortId(s.id)}</span></details>
         </div>
       </div>
       <span className="shrink-0 text-xs text-gray-600">

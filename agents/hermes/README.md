@@ -1,5 +1,32 @@
 # Connecting Hermes (NousResearch hermes-agent)
 
+## Leitstand topic reporter
+
+This installation uses `status_reporter.py`, a deterministic, status-only service
+with a separate credential for each Telegram topic. It does not require the model
+to remember to call an MCP tool. It observes:
+
+- Gateway heartbeat and topic routing, with process identity checks.
+- Foreground turns, including turns owned by managed worker processes.
+- Topic-owned background processes and asynchronous delegations.
+- Enabled cron schedules, running executions, next run and last recorded activity.
+
+The reporter projects only metadata from SQLite/JSON. Commands, prompts, message
+text, results and Telegram identifiers are not sent to Leitstand. Credentials stay
+in the private service configuration. The installed service polls every 15 seconds
+plus request time; short work may appear as a new last-activity timestamp without
+being caught in the running state. External services without a local process or
+execution record require a separate reporter. Unverifiable process ownership or
+unavailable metadata is reported as unknown/needs checking, not idle.
+
+Fleet and filtered History show the last connection check separately from the
+last work activity and next scheduled run. A connected gateway is not evidence
+that all work is finished. Automated regression checks live in
+`tests/unit/test_hermes_topics.py`.
+
+The optional MCP integration below is separate from this status-only setup and
+requires additional permissions if enabled.
+
 Hermes Agent (github.com/NousResearch/hermes-agent, MIT) is model-agnostic —
 point it at Nous Portal, OpenRouter, Anthropic, or OpenAI via `hermes model`.
 It has first-class MCP support ("connect to any MCP server", with tool
